@@ -1,35 +1,36 @@
 {
-  "name": "binance-webapp",
+  "name": "crypto-momentum-dashboard",
   "version": "1.0.0",
-  "description": "Binance momentum web dashboard",
-  "type": "module",
-  "main": "dist/index.js",
+  "private": true,
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit"
-  },
-  "keywords": [
-    "binance",
-    "crypto",
-    "momentum",
-    "dashboard",
-    "web-ui"
-  ],
-  "author": "",
-  "license": "MIT",
-  "engines": {
-    "node": ">=18.0.0"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "pg": "^8.16.3"
+    "@types/pg": "^8.15.5",
+    "@types/uuid": "^10.0.0",
+    "clsx": "2.1.1",
+    "lightweight-charts": "4.1.0",
+    "next": "14.2.5",
+    "pg": "8.12.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.6",
-    "@types/pg": "^8.12.0",
-    "tsx": "^4.20.1",
-    "typescript": "^5.7.3"
+    "@types/node": "20.14.11",
+    "@types/react": "18.3.3",
+    "@types/react-dom": "18.3.0",
+    "autoprefixer": "10.4.19",
+    "eslint": "8.57.0",
+    "eslint-config-next": "14.2.5",
+    "postcss": "8.4.39",
+    "tailwindcss": "3.4.9",
+    "typescript": "5.5.4"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

@@ -1,0 +1,14 @@
+{
+  "monotonic_up": {
+    "description": "30 days of consistent 1% daily gains",
+    "candles": []
+  },
+  "monotonic_down": {
+    "description": "30 days of consistent 1% daily losses", 
+    "candles": []
+  },
+  "volatile_sideways": {
+    "description": "30 days of +2%/-2% alternating",
+    "candles": []
+  }
+}
