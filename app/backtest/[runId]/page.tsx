@@ -47,6 +47,7 @@ export default function BacktestDetailsPage() {
   const [results, setResults] = useState<BacktestResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchBacktestDetails() {
@@ -67,7 +68,14 @@ export default function BacktestDetailsPage() {
         // Results might not exist for queued/running/error backtests
         if (resultsRes.ok) {
           const resultsData = await resultsRes.json();
-          setResults(resultsData.results || []);
+          const resultsArray = resultsData.results || [];
+          setResults(resultsArray);
+          
+          // Set default selected symbol to the first symbol with trades
+          const symbolsWithTrades = resultsArray.filter((r: BacktestResult) => r.trades > 0);
+          if (symbolsWithTrades.length > 0 && !selectedSymbol) {
+            setSelectedSymbol(symbolsWithTrades[0].symbol);
+          }
         }
         
         // Set page title
@@ -240,16 +248,63 @@ export default function BacktestDetailsPage() {
         <h1 className="text-3xl font-bold">
           {run.name || 'Unnamed Backtest'}
         </h1>
-        <div className={`px-3 py-1 rounded text-sm font-medium ${
-          run.status === 'done' && 'bg-green-500/20 text-green-400'
-        } ${
-          run.status === 'running' && 'bg-blue-500/20 text-blue-400'
-        } ${
-          run.status === 'queued' && 'bg-yellow-500/20 text-yellow-400'
-        } ${
-          run.status === 'error' && 'bg-red-500/20 text-red-400'
-        }`}>
-          {run.status.toUpperCase()}
+        <div className="flex items-center gap-3">
+          <button 
+            className="flex items-center gap-2 px-3 py-1 rounded text-sm font-medium bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors"
+            onClick={async () => {
+              try {
+                // Trigger download of comprehensive backtest data
+                const response = await fetch(`/api/backtest/export/${run.run_id}`);
+                
+                if (!response.ok) {
+                  throw new Error(`Export failed: ${response.status}`);
+                }
+                
+                // Get the filename from the Content-Disposition header
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = `backtest_${run.strategy_name}_${run.run_id}.json`;
+                
+                if (contentDisposition && contentDisposition.includes('filename=')) {
+                  const matches = contentDisposition.match(/filename="?([^"]+)"?/);
+                  if (matches && matches[1]) {
+                    filename = matches[1];
+                  }
+                }
+                
+                // Create blob and download
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                console.log(`Downloaded backtest data: ${filename}`);
+              } catch (error: any) {
+                console.error('Download failed:', error);
+                alert('Failed to download backtest data: ' + error.message);
+              }
+            }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Download Data
+          </button>
+          <div className={`px-3 py-1 rounded text-sm font-medium ${
+            run.status === 'done' && 'bg-green-500/20 text-green-400'
+          } ${
+            run.status === 'running' && 'bg-blue-500/20 text-blue-400'
+          } ${
+            run.status === 'queued' && 'bg-yellow-500/20 text-yellow-400'
+          } ${
+            run.status === 'error' && 'bg-red-500/20 text-red-400'
+          }`}>
+            {run.status.toUpperCase()}
+          </div>
         </div>
       </div>
 
@@ -475,16 +530,52 @@ export default function BacktestDetailsPage() {
           </div>
 
           {/* Price Chart */}
-          <OptimizedCandlestickChart 
-            symbols={run.symbols}
-            startDate={run.start_ts}
-            endDate={run.end_ts}
-            runId={run.run_id}
-          />
+          <div className="rounded-xl border border-border bg-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              {/* Symbol Selector */}
+              {results.length > 1 && (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-sub">Symbol:</span>
+                  <select
+                    value={selectedSymbol || ''}
+                    onChange={(e) => setSelectedSymbol(e.target.value)}
+                    className="bg-bg border border-border rounded px-3 py-1 text-sm"
+                  >
+                    {results
+                      .filter(r => r.trades > 0)
+                      .map(result => (
+                        <option key={result.symbol} value={result.symbol}>
+                          {result.symbol} ({result.trades} trades)
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+              )}
+            </div>
+            
+            {selectedSymbol ? (
+              <OptimizedCandlestickChart 
+                symbols={[selectedSymbol]}
+                startDate={run.start_ts}
+                endDate={run.end_ts}
+                runId={run.run_id}
+                className="!p-0 !border-0 !bg-transparent"
+              />
+            ) : (
+              <div className="h-96 flex items-center justify-center text-sub">
+                <div className="text-center">
+                  <p className="text-lg mb-2">No trades executed</p>
+                  <p className="text-sm">This backtest did not generate any trades to display on the chart.</p>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Trade History */}
           <TradesList 
             runId={run.run_id}
+            selectedSymbol={selectedSymbol}
           />
 
           {/* Placeholders for Additional Charts */}

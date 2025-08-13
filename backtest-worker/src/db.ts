@@ -56,6 +56,82 @@ export async function setRunDone(run_id: string) {
   await pool.query(`UPDATE bt_runs SET status='done', error=NULL WHERE run_id=$1`, [run_id]);
 }
 
+export async function logExecutionStep(executionLog: {
+  run_id: string;
+  symbol: string;
+  bar_index: number;
+  ts: string;
+  candle_data: any;
+  strategy_signals: any[];
+  filtered_signals: any[];
+  pending_signals: any[];
+  executed_signals: any[];
+  positions_before: any[];
+  positions_after: any[];
+  account_balance: number;
+  total_equity: number;
+  unrealized_pnl: number;
+  execution_price?: number;
+  slippage_amount?: number;
+  commission_paid?: number;
+  funding_paid?: number;
+  strategy_state: any;
+  rejection_reasons?: string[];
+  execution_notes?: string;
+}) {
+  try {
+    await pool.query(
+      `INSERT INTO bt_execution_logs 
+       (run_id, symbol, bar_index, ts, candle_data, strategy_signals, filtered_signals, 
+        pending_signals, executed_signals, positions_before, positions_after, 
+        account_balance, total_equity, unrealized_pnl, execution_price, slippage_amount,
+        commission_paid, funding_paid, strategy_state, rejection_reasons, execution_notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+       ON CONFLICT (run_id, symbol, bar_index) DO UPDATE SET
+         candle_data = EXCLUDED.candle_data,
+         strategy_signals = EXCLUDED.strategy_signals,
+         filtered_signals = EXCLUDED.filtered_signals,
+         pending_signals = EXCLUDED.pending_signals,
+         executed_signals = EXCLUDED.executed_signals,
+         positions_after = EXCLUDED.positions_after,
+         total_equity = EXCLUDED.total_equity,
+         unrealized_pnl = EXCLUDED.unrealized_pnl,
+         execution_price = EXCLUDED.execution_price,
+         slippage_amount = EXCLUDED.slippage_amount,
+         commission_paid = EXCLUDED.commission_paid,
+         funding_paid = EXCLUDED.funding_paid,
+         strategy_state = EXCLUDED.strategy_state,
+         rejection_reasons = EXCLUDED.rejection_reasons,
+         execution_notes = EXCLUDED.execution_notes`,
+      [
+        executionLog.run_id,
+        executionLog.symbol,
+        executionLog.bar_index,
+        executionLog.ts,
+        JSON.stringify(executionLog.candle_data),
+        JSON.stringify(executionLog.strategy_signals),
+        JSON.stringify(executionLog.filtered_signals),
+        JSON.stringify(executionLog.pending_signals),
+        JSON.stringify(executionLog.executed_signals),
+        JSON.stringify(executionLog.positions_before),
+        JSON.stringify(executionLog.positions_after),
+        executionLog.account_balance,
+        executionLog.total_equity,
+        executionLog.unrealized_pnl,
+        executionLog.execution_price || null,
+        executionLog.slippage_amount || null,
+        executionLog.commission_paid || null,
+        executionLog.funding_paid || null,
+        JSON.stringify(executionLog.strategy_state),
+        executionLog.rejection_reasons ? JSON.stringify(executionLog.rejection_reasons) : null,
+        executionLog.execution_notes || null
+      ]
+    );
+  } catch (error: any) {
+    console.error(`Failed to log execution step for ${executionLog.symbol} bar ${executionLog.bar_index}:`, error.message);
+  }
+}
+
 export async function writeResults(run_id: string, symbol: string, result: any) {
   const s = result.summary;
   await pool.query(
@@ -80,7 +156,38 @@ export async function writeResults(run_id: string, symbol: string, result: any) 
     );
   }
 
-  // optional: write trades too
+  // Write individual trades to bt_trades table
+  if (result.trades?.length) {
+    console.log(`Writing ${result.trades.length} trades for ${symbol}`);
+    
+    for (const trade of result.trades) {
+      try {
+        await pool.query(
+          `INSERT INTO bt_trades 
+           (run_id, symbol, entry_ts, exit_ts, side, qty, entry_px, exit_px, pnl, fees, reason)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           ON CONFLICT (run_id, symbol, entry_ts) DO UPDATE SET
+             exit_ts=EXCLUDED.exit_ts, exit_px=EXCLUDED.exit_px, pnl=EXCLUDED.pnl, fees=EXCLUDED.fees`,
+          [
+            run_id,
+            symbol,
+            trade.entryTs,
+            trade.exitTs || null,
+            trade.side.toLowerCase(),
+            trade.qty,
+            trade.entryPx,
+            trade.exitPx || null,
+            trade.pnl,
+            trade.fees,
+            trade.reason || 'unknown'
+          ]
+        );
+      } catch (err: any) {
+        console.error(`Failed to insert trade:`, err.message);
+        console.error('Trade data:', trade);
+      }
+    }
+  }
 }
 
 export async function loadCandlesWithFeatures(symbol: string, start: string, end: string): Promise<Candle[]> {

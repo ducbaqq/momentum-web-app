@@ -15,9 +15,11 @@ export interface MomentumParams {
 export class MomentumBreakoutStrategy {
   private params: MomentumParams;
   private currentPosition: { symbol: string; side: 'LONG' | 'SHORT'; size: number } | null = null;
+  private symbol: string;
 
-  constructor(params: MomentumParams) {
+  constructor(params: MomentumParams, symbol: string = 'BTCUSDT') {
     this.params = params;
+    this.symbol = symbol;
   }
 
   // Generate trading signals based on current candle and state
@@ -27,8 +29,8 @@ export class MomentumBreakoutStrategy {
     // Skip first few bars to ensure we have previous data
     if (index < 2) return signals;
 
-    // Get the symbol from candle (fallback to default)
-    const symbol = this.getSymbolFromCandle(candle);
+    // Use the symbol passed to the strategy
+    const symbol = this.symbol;
     
     // Check exit conditions first
     const exitSignal = this.checkExitConditions(candle, state);
@@ -40,7 +42,7 @@ export class MomentumBreakoutStrategy {
 
     // Check entry conditions if no position
     if (!this.currentPosition) {
-      const entrySignal = this.checkEntryConditions(candle, state, symbol);
+      const entrySignal = this.checkEntryConditions(candle, state, symbol, index);
       if (entrySignal) {
         signals.push(entrySignal);
         this.currentPosition = {
@@ -54,20 +56,27 @@ export class MomentumBreakoutStrategy {
     return signals;
   }
 
-  private checkEntryConditions(candle: Candle, state: EngineState, symbol: string): TradeSignal | null {
-    // Validate required data is available
-    if (!candle.roc_5m || !candle.vol_mult || candle.spread_bps === null || candle.spread_bps === undefined) {
-      return null;
-    }
+  private checkEntryConditions(candle: Candle, state: EngineState, symbol: string, index: number): TradeSignal | null {
+    // Tolerate missing features by using conservative defaults
+    const roc5m = candle.roc_5m ?? 0;           // 0% momentum if missing
+    const volMult = candle.vol_mult ?? 1;       // 1x volume if missing
+    const spreadBps = candle.spread_bps ?? 0;   // 0 bps spread if missing
 
     // Check entry conditions
-    const momentumOk = candle.roc_5m >= this.params.minRoc5m;
-    const volumeOk = candle.vol_mult >= this.params.minVolMult;
-    const spreadOk = candle.spread_bps <= this.params.maxSpreadBps;
+    const momentumOk = roc5m >= this.params.minRoc5m;
+    const volumeOk = volMult >= this.params.minVolMult;
+    const spreadOk = spreadBps <= this.params.maxSpreadBps;
 
+    // Add debug logging for the first few failed conditions
     if (!momentumOk || !volumeOk || !spreadOk) {
+      if (index < 10) { // Only log first 10 bars to avoid spam
+        console.log(`[${symbol}] Entry rejected at bar ${index}: momentum=${momentumOk}(${roc5m}>${this.params.minRoc5m}), volume=${volumeOk}(${volMult}>${this.params.minVolMult}), spread=${spreadOk}(${spreadBps}<=${this.params.maxSpreadBps})`);
+      }
       return null;
     }
+
+    // Log successful entry signal
+    console.log(`[${symbol}] 🚀 ENTRY SIGNAL at bar ${index}: roc5m=${roc5m}%, volMult=${volMult}x, spread=${spreadBps}bps`);
 
     // Calculate position size based on risk percentage
     const riskAmount = state.totalEquity * (this.params.riskPct / 100);
@@ -88,8 +97,8 @@ export class MomentumBreakoutStrategy {
     if (!this.currentPosition) return null;
 
     // Exit on momentum loss or RSI overbought
-    const momentumLost = candle.roc_1m !== null && candle.roc_1m < 0;
-    const rsiOverbought = candle.rsi_14 !== null && candle.rsi_14 > this.params.rsiExitLevel;
+    const momentumLost = (candle.roc_1m ?? null) !== null && (candle.roc_1m as number) < 0;
+    const rsiOverbought = (candle.rsi_14 ?? null) !== null && (candle.rsi_14 as number) > this.params.rsiExitLevel;
 
     if (momentumLost || rsiOverbought) {
       // Close entire position
@@ -104,11 +113,6 @@ export class MomentumBreakoutStrategy {
     return null;
   }
 
-  private getSymbolFromCandle(candle: Candle): string {
-    // In practice, this would be passed or determined from context
-    // For now, assume we're always trading the same symbol
-    return 'BTCUSDT';
-  }
 }
 
 // Updated strategy runner using new engine
@@ -116,7 +120,8 @@ export async function runMomentumStrategy(
   candles: Candle[],
   params: MomentumParams,
   initialBalance: number = 10000,
-  exchangeSpecs?: Record<string, ExchangeSpec>
+  exchangeSpecs?: Record<string, ExchangeSpec>,
+  symbol: string = 'BTCUSDT'
 ): Promise<any> {
   
   // Configure trading engine
@@ -128,7 +133,7 @@ export async function runMomentumStrategy(
   };
 
   const engine = new Engine(engineConfig);
-  const strategy = new MomentumBreakoutStrategy(params);
+  const strategy = new MomentumBreakoutStrategy(params, symbol);
 
   // Run backtest
   const result = await engine.runBacktest(candles, (candle, index, state) => {
@@ -138,13 +143,13 @@ export async function runMomentumStrategy(
   // Convert to expected format for compatibility
   return {
     trades: result.trades.map(trade => ({
-      entryTs: trade.orderTime,
-      exitTs: trade.fillTime,
+      entryTs: new Date(trade.orderTime).toISOString(),
+      exitTs: trade.fillTime ? new Date(trade.fillTime).toISOString() : null,
       side: trade.side === 'BUY' ? 'LONG' : 'SHORT',
       qty: trade.filledQuantity,
       entryPx: trade.averageFillPrice,
       exitPx: trade.averageFillPrice, // Simplified
-      pnl: result.totalPnl / (result.totalTrades || 1), // Rough approximation
+      pnl: trade.position?.realizedPnl || 0, // Use actual realized PnL from the trade
       fees: trade.commission,
       reason: 'momentum_breakout'
     })),

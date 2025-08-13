@@ -55,6 +55,7 @@ export async function runStrategy(
         wins += pnl > 0 ? 1 : 0;
         losses += pnl <= 0 ? 1 : 0;
         equity += pnl;
+        console.log(`${symbol}: EXIT at ${c.ts}, price: ${position.exitPx.toFixed(2)}, PnL: ${pnl.toFixed(2)}`);
         position = null;
       }
     }
@@ -78,6 +79,7 @@ export async function runStrategy(
       feesAcc += fees;
       turnover += notional;
       position = { entryTs: c.ts, side: 'LONG', qty, entryPx: px, reason: 'breakout' };
+      console.log(`${symbol}: LONG entry at ${c.ts}, price: ${px.toFixed(2)}, qty: ${qty.toFixed(4)}`);
     }
 
     // Mark-to-market (simplified)

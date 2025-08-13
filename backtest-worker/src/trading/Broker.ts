@@ -1,6 +1,6 @@
 import { Position, PositionSide, MarginMode, createPosition, calculateUnrealizedPnl, getPositionNotional, isLiquidatable, calculateLiquidationPrice } from './Position.js';
 import { Order, OrderSide, createMarketOrder } from './Order.js';
-import { ExchangeSpec, getRiskTier, validateOrderSize } from './ExchangeSpec.js';
+import { ExchangeSpec, getRiskTier, validateOrderSize, getDefaultSpecForSymbol } from './ExchangeSpec.js';
 import { Executor, ExecutionContext, ExecutionResult } from './Executor.js';
 
 export interface BrokerState {
@@ -70,7 +70,12 @@ export class Broker {
     leverage: number = 1,
     marginMode: MarginMode = 'CROSS'
   ): TradeResult {
-    const spec = this.exchangeSpecs[symbol];
+    let spec = this.exchangeSpecs[symbol];
+    if (!spec) {
+      // Fallback to a default spec for unseen symbols
+      spec = getDefaultSpecForSymbol(symbol);
+      this.exchangeSpecs[symbol] = spec;
+    }
     if (!spec) {
       return { success: false, error: `No exchange spec for ${symbol}` };
     }

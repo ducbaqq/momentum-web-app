@@ -79,6 +79,32 @@ export const BINANCE_SPECS: Record<string, ExchangeSpec> = {
   }
 };
 
+// Provide a reasonable default spec for symbols not explicitly listed above
+export function getDefaultSpecForSymbol(symbol: string): ExchangeSpec {
+  return {
+    symbol,
+    // Use conservative, ETH-like defaults
+    tickSize: 0.01,
+    lotSize: 0.001,
+    minOrderSize: 0.001,
+    maxOrderSize: 10000,
+    maxLeverage: 50,
+    leverageStep: 1,
+    makerFeeBps: 2,
+    takerFeeBps: 4,
+    riskTiers: [
+      { maxNotional: 25000, initialMarginRate: 0.005, maintenanceMarginRate: 0.0025 },
+      { maxNotional: 100000, initialMarginRate: 0.0075, maintenanceMarginRate: 0.00375 },
+      { maxNotional: 500000, initialMarginRate: 0.01, maintenanceMarginRate: 0.005 },
+      { maxNotional: 1000000, initialMarginRate: 0.025, maintenanceMarginRate: 0.0125 },
+      { maxNotional: Infinity, initialMarginRate: 0.05, maintenanceMarginRate: 0.025 },
+    ],
+    fundingInterval: 8,
+    maxFundingRate: 0.0075,
+    priceDeviationLimit: 0.1,
+  };
+}
+
 // Get risk tier for a given position notional
 export function getRiskTier(spec: ExchangeSpec, notional: number): RiskTier {
   for (const tier of spec.riskTiers) {

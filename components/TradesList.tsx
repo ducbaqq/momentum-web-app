@@ -21,68 +21,14 @@ type Trade = {
 interface TradesListProps {
   runId: string;
   className?: string;
+  selectedSymbol?: string | null;
 }
 
-export default function TradesList({ runId, className }: TradesListProps) {
+export default function TradesList({ runId, className, selectedSymbol }: TradesListProps) {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Mock data for demonstration (remove when real trades are available)
-  const mockTrades: Trade[] = [
-    {
-      run_id: runId,
-      symbol: 'ATOMUSDT',
-      entry_ts: '2025-08-12T10:15:00.000Z',
-      exit_ts: '2025-08-12T11:30:00.000Z',
-      side: 'long',
-      qty: 100,
-      entry_px: 4.482,
-      exit_px: 4.521,
-      pnl: 3.90,
-      fees: 0.45,
-      reason: 'momentum_breakout'
-    },
-    {
-      run_id: runId,
-      symbol: 'ATOMUSDT',
-      entry_ts: '2025-08-12T12:45:00.000Z',
-      exit_ts: '2025-08-12T13:20:00.000Z',
-      side: 'long',
-      qty: 85,
-      entry_px: 4.495,
-      exit_px: 4.488,
-      pnl: -0.60,
-      fees: 0.38,
-      reason: 'stop_loss'
-    },
-    {
-      run_id: runId,
-      symbol: 'ATOMUSDT',
-      entry_ts: '2025-08-12T14:10:00.000Z',
-      exit_ts: '2025-08-12T15:45:00.000Z',
-      side: 'long',
-      qty: 120,
-      entry_px: 4.470,
-      exit_px: 4.512,
-      pnl: 5.04,
-      fees: 0.54,
-      reason: 'momentum_breakout'
-    },
-    {
-      run_id: runId,
-      symbol: 'ATOMUSDT',
-      entry_ts: '2025-08-12T15:50:00.000Z',
-      exit_ts: null,
-      side: 'long',
-      qty: 95,
-      entry_px: 4.485,
-      exit_px: null,
-      pnl: 0,
-      fees: 0.43,
-      reason: 'open'
-    }
-  ];
 
   useEffect(() => {
     async function fetchTrades() {
@@ -96,18 +42,17 @@ export default function TradesList({ runId, className }: TradesListProps) {
         
         const data = await response.json();
         
-        // Use mock data if no real trades available
-        if (data.trades && data.trades.length > 0) {
-          setTrades(data.trades);
-        } else {
-          console.log('No trades found, using mock data for demonstration');
-          setTrades(mockTrades);
-        }
+        // Set real trades data (empty array if no trades)
+        const allTrades = data.trades || [];
+        // Filter trades by selected symbol if provided
+        const filteredTrades = selectedSymbol 
+          ? allTrades.filter((trade: Trade) => trade.symbol === selectedSymbol)
+          : allTrades;
+        setTrades(filteredTrades);
       } catch (e: any) {
         console.error('Failed to fetch trades:', e);
         setError(e.message);
-        // Fallback to mock data even on error
-        setTrades(mockTrades);
+        setTrades([]);
       } finally {
         setLoading(false);
       }
@@ -116,7 +61,7 @@ export default function TradesList({ runId, className }: TradesListProps) {
     if (runId) {
       fetchTrades();
     }
-  }, [runId]);
+  }, [runId, selectedSymbol]);
 
   const formatPrice = (price: number | null): string => {
     if (price == null) return '--';

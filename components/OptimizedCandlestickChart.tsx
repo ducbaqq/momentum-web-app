@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { IChartApi, ISeriesApi, CandlestickData, UTCTimestamp, SeriesMarker, Time } from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, CandlestickData, UTCTimestamp, SeriesMarker, Time, HistogramData } from 'lightweight-charts';
 
 type Trade = {
   run_id: string;
@@ -33,62 +33,8 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
   const [error, setError] = useState<string | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
-  // Mock trades for demonstration (same as TradesList)
-  const mockTrades: Trade[] = [
-    {
-      run_id: runId,
-      symbol: symbols[0] || 'ATOMUSDT',
-      entry_ts: '2025-08-12T10:15:00.000Z',
-      exit_ts: '2025-08-12T11:30:00.000Z',
-      side: 'long',
-      qty: 100,
-      entry_px: 4.482,
-      exit_px: 4.521,
-      pnl: 3.90,
-      fees: 0.45,
-      reason: 'momentum_breakout'
-    },
-    {
-      run_id: runId,
-      symbol: symbols[0] || 'ATOMUSDT',
-      entry_ts: '2025-08-12T12:45:00.000Z',
-      exit_ts: '2025-08-12T13:20:00.000Z',
-      side: 'long',
-      qty: 85,
-      entry_px: 4.495,
-      exit_px: 4.488,
-      pnl: -0.60,
-      fees: 0.38,
-      reason: 'stop_loss'
-    },
-    {
-      run_id: runId,
-      symbol: symbols[0] || 'ATOMUSDT',
-      entry_ts: '2025-08-12T14:10:00.000Z',
-      exit_ts: '2025-08-12T15:45:00.000Z',
-      side: 'long',
-      qty: 120,
-      entry_px: 4.470,
-      exit_px: 4.512,
-      pnl: 5.04,
-      fees: 0.54,
-      reason: 'momentum_breakout'
-    },
-    {
-      run_id: runId,
-      symbol: symbols[0] || 'ATOMUSDT',
-      entry_ts: '2025-08-12T15:50:00.000Z',
-      exit_ts: null,
-      side: 'long',
-      qty: 95,
-      entry_px: 4.485,
-      exit_px: null,
-      pnl: 0,
-      fees: 0.43,
-      reason: 'open'
-    }
-  ];
 
   // Only run on client side
   useEffect(() => {
@@ -104,17 +50,16 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
       }
       const data = await response.json();
       
-      // Use mock data if no real trades available
-      if (data.trades && data.trades.length > 0) {
-        setTrades(data.trades);
-      } else {
-        console.log('[Chart] No trades found, using mock data for demonstration');
-        setTrades(mockTrades);
-      }
+      // Set real trades data (empty array if no trades)
+      const allTrades = data.trades || [];
+      // Filter trades by the symbol(s) being displayed
+      const filteredTrades = symbols.length === 1 
+        ? allTrades.filter((trade: Trade) => trade.symbol === symbols[0])
+        : allTrades;
+      setTrades(filteredTrades);
     } catch (err: any) {
       console.error('[Chart] Failed to fetch trades:', err);
-      // Fallback to mock data even on error
-      setTrades(mockTrades);
+      setTrades([]);
     }
   };
 
@@ -132,7 +77,7 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
         tf: '15m',
         start_date: startDate,
         end_date: endDate,
-        limit: '100'
+        limit: '500'  // Increased to handle longer backtest periods
       });
 
       const response = await fetch(`/api/backtest/chart?${params}`);
@@ -158,10 +103,14 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
   // Create markers from trades
   const createTradeMarkers = (trades: Trade[]): SeriesMarker<Time>[] => {
     const markers: SeriesMarker<Time>[] = [];
+    // The chart uses 15m aggregated candles; align marker times to 15m bucket starts
+    const bucketSeconds = 15 * 60;
+    const toBucketTime = (unixSeconds: number) => Math.floor(unixSeconds / bucketSeconds) * bucketSeconds;
 
     trades.forEach((trade) => {
       // Entry marker (BUY)
-      const entryTime = Math.floor(new Date(trade.entry_ts).getTime() / 1000) as Time;
+      const entryUnix = Math.floor(new Date(trade.entry_ts).getTime() / 1000);
+      const entryTime = toBucketTime(entryUnix) as Time;
       markers.push({
         time: entryTime,
         position: 'belowBar',
@@ -173,7 +122,8 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
 
       // Exit marker (SELL) - only if trade is closed
       if (trade.exit_ts && trade.exit_px) {
-        const exitTime = Math.floor(new Date(trade.exit_ts).getTime() / 1000) as Time;
+        const exitUnix = Math.floor(new Date(trade.exit_ts).getTime() / 1000);
+        const exitTime = toBucketTime(exitUnix) as Time;
         const pnlColor = trade.pnl >= 0 ? '#10b981' : '#ef4444';
         markers.push({
           time: exitTime,
@@ -195,6 +145,7 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
 
     let chart: IChartApi | null = null;
     let series: ISeriesApi<'Candlestick'> | null = null;
+    let volumeSeries: ISeriesApi<'Histogram'> | null = null;
 
     const initChart = async () => {
       try {
@@ -228,7 +179,7 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
             },
           },
           width: chartContainerRef.current!.clientWidth || 600,
-          height: 400,
+          height: 500, // Increased height to accommodate volume
         });
 
         series = chart.addCandlestickSeries({
@@ -239,6 +190,32 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
           wickDownColor: '#ef4444',
           wickUpColor: '#10b981',
         });
+
+        // Add volume series below the price chart
+        volumeSeries = chart.addHistogramSeries({
+          color: '#26a69a',
+          priceFormat: {
+            type: 'volume',
+          },
+          priceScaleId: 'volume',
+          scaleMargins: {
+            top: 0.7, // Volume takes up bottom 30% of chart
+            bottom: 0,
+          },
+        });
+
+        // Configure volume price scale on the right
+        chart.priceScale('volume').applyOptions({
+          scaleMargins: {
+            top: 0.7,
+            bottom: 0,
+          },
+        });
+
+        // Store volume series reference for external access
+        if (volumeSeriesRef && volumeSeriesRef.current !== volumeSeries) {
+          volumeSeriesRef.current = volumeSeries;
+        }
 
         // Handle resize
         const handleResize = () => {
@@ -261,7 +238,15 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
             close: Number(d.close),
           }));
           
+          // Format volume data
+          const volumeData: HistogramData[] = chartData.map(d => ({
+            time: d.time as UTCTimestamp,
+            value: Number(d.volume),
+            color: Number(d.close) >= Number(d.open) ? '#10b981' : '#ef4444', // Green for up, red for down
+          }));
+          
           series.setData(formattedData);
+          volumeSeries.setData(volumeData);
           
           // Add trade markers if we have trades
           if (trades.length > 0) {
@@ -276,7 +261,11 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
 
         return () => {
           window.removeEventListener('resize', handleResize);
-          if (chart) chart.remove();
+          if (chart) {
+            chart.remove();
+          }
+          // Clear volume series ref
+          if (volumeSeriesRef) volumeSeriesRef.current = null;
         };
       } catch (err: any) {
         console.error('[OptChart] Init error:', err);
@@ -346,15 +335,15 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
       {!loading && !error && (
         <div 
           ref={chartContainerRef} 
-          className="w-full h-96"
-          style={{ minHeight: '400px' }}
+          className="w-full h-[500px]"
+          style={{ minHeight: '500px' }}
         />
       )}
 
       {chartData.length > 0 && !loading && !error && (
         <div className="mt-4 space-y-2">
           <div className="text-xs text-sub text-center">
-            {chartData.length} data points • {symbols[0]} • 15m timeframe
+            {chartData.length} data points • {symbols[0]} • 15m timeframe • Volume included
           </div>
           
           {trades.length > 0 && (

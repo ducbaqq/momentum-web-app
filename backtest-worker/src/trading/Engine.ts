@@ -59,6 +59,10 @@ export class Engine {
       defaultLeverage: 1,
       ...config
     };
+    // Ensure defaults are preserved when undefined is passed in
+    if (!this.config.exchangeSpecs) {
+      this.config.exchangeSpecs = BINANCE_SPECS;
+    }
 
     this.broker = new Broker(config.initialBalance, this.config.exchangeSpecs!);
     this.broker.setPositionMode(this.config.positionMode!);

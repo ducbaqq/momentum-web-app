@@ -15,6 +15,7 @@ export interface StrategyContext {
 
 export interface Candle {
   ts: string; // ISO timestamp string, matches database timestamp format
+  symbol?: string; // Optional: symbol for multi-asset contexts
   open: number; 
   high: number; 
   low: number; 

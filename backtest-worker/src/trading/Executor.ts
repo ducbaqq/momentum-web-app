@@ -1,5 +1,5 @@
 import { Order, OrderStatus } from './Order.js';
-import { ExchangeSpec, roundToTickSize } from './ExchangeSpec.js';
+import { ExchangeSpec, roundToTickSize, getDefaultSpecForSymbol } from './ExchangeSpec.js';
 import type { Candle } from '../types.js';
 
 export interface L1Snapshot {
@@ -34,7 +34,12 @@ export class Executor {
 
   // Execute order and return fill details
   executeOrder(order: Order, context: ExecutionContext): ExecutionResult {
-    const spec = this.exchangeSpecs[order.symbol];
+    let spec = this.exchangeSpecs[order.symbol];
+    if (!spec) {
+      // Fallback default spec for unknown symbols
+      spec = getDefaultSpecForSymbol(order.symbol);
+      this.exchangeSpecs[order.symbol] = spec;
+    }
     if (!spec) {
       return {
         fillPrice: 0,

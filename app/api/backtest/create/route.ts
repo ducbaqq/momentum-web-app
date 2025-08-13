@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
       timeframe = '1m',
       strategy_name,
       strategy_version = '1.0',
+      starting_capital,
       params,
       execution,
       seed = Math.floor(Math.random() * 1000000)
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
         timeframe,
         strategy_name,
         strategy_version,
-        JSON.stringify({ ...params, ...execution }),
+        JSON.stringify({ ...params, ...execution, starting_capital }),
         seed
       ]
     );

@@ -2,6 +2,7 @@ import { pool } from '../db.js';
 import type { Candle } from '../types.js';
 import { ExchangeSpec } from './ExchangeSpec.js';
 import { L1Snapshot } from './Executor.js';
+import { aggregateCandles, Timeframe } from '../utils.js';
 
 export interface ProfessionalCandle extends Candle {
   // Enhanced with professional data
@@ -31,7 +32,8 @@ export class DataLoader {
   static async loadProfessionalCandles(
     symbol: string, 
     start: string, 
-    end: string
+    end: string,
+    timeframe: Timeframe = '1m'
   ): Promise<ProfessionalCandle[]> {
     
     const query = `
@@ -122,7 +124,8 @@ export class DataLoader {
     
     console.log(`Loaded ${result.rows.length} professional candles for ${symbol}`);
     
-    return result.rows.map(row => ({
+    // Convert raw results to candles
+    const candles = result.rows.map(row => ({
       // Base candle data
       ts: row.ts,
       open: Number(row.open),
@@ -165,6 +168,14 @@ export class DataLoader {
         askSize: Number(row.ask_size || 0)
       } : undefined
     }));
+    
+    // Apply timeframe aggregation if needed
+    if (timeframe === '1m') {
+      return candles;
+    }
+    
+    console.log(`Aggregating to ${timeframe} timeframe`);
+    return aggregateCandles(candles, timeframe);
   }
 
   // Load historical funding rates
