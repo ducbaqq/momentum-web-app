@@ -98,8 +98,8 @@ export interface EnhancedBacktestResult extends EngineResult {
 }
 
 export class BacktestEngine extends Engine {
-  private config: BacktestConfig;
-  private currentBar: number = 0;
+  private backtestConfig: BacktestConfig;
+  private backtestCurrentBar: number = 0;
   private pendingSignals: Array<{
     signal: TradeSignal;
     executeAt: number;
@@ -118,21 +118,24 @@ export class BacktestEngine extends Engine {
   
   constructor(config: BacktestConfig) {
     super(config);
-    this.config = {
-      warmupBars: 50,
-      preventLookAhead: true,
-      executeOnNextBar: true,
-      slippageBps: 2,
-      maxSpreadBps: 20,
-      fundingEnabled: true,
-      seed: 42,
-      strategyVersion: '1.0.0',
-      riskFreeRate: 0.02, // 2% annual
-      ...config
+    this.backtestConfig = {
+      warmupBars: config.warmupBars ?? 50,
+      preventLookAhead: config.preventLookAhead ?? true,
+      executeOnNextBar: config.executeOnNextBar ?? true,
+      slippageBps: config.slippageBps ?? 2,
+      maxSpreadBps: config.maxSpreadBps ?? 20,
+      fundingEnabled: config.fundingEnabled ?? true,
+      seed: config.seed ?? 42,
+      strategyVersion: config.strategyVersion ?? '1.0.0',
+      riskFreeRate: config.riskFreeRate ?? 0.02,
+      initialBalance: config.initialBalance,
+      exchangeSpecs: config.exchangeSpecs,
+      positionMode: config.positionMode,
+      defaultLeverage: config.defaultLeverage
     };
     
     // Seed random number generator for deterministic results
-    this.seedRandom(this.config.seed);
+    this.seedRandom(this.backtestConfig.seed);
   }
   
   /**
@@ -165,7 +168,7 @@ export class BacktestEngine extends Engine {
     }
     
     // Execute any remaining pending signals after the last bar
-    if (this.config.executeOnNextBar && this.pendingSignals.length > 0) {
+    if (this.backtestConfig.executeOnNextBar && this.pendingSignals.length > 0) {
       console.log(`Executing ${this.pendingSignals.length} remaining pending signals after backtest completion`);
       const lastCandle = candles[candles.length - 1];
       
@@ -185,20 +188,20 @@ export class BacktestEngine extends Engine {
     }
     
     // Calculate enhanced metrics
-    const basicResult = this.getResults();
+    const basicResult = (this as any).getResults();
     const enhancedMetrics = this.calculateEnhancedMetrics(basicResult);
-    const drawdownSeries = this.calculateDrawdownSeries(basicResult.equityCurve);
-    const dailyReturns = this.calculateDailyReturns();
+    const drawdownSeries = this.computeDrawdownSeries(basicResult.equityCurve);
+    const dailyReturns = this.computeDailyReturns();
     
     const fullMetadata: BacktestMetadata = {
       runId: metadata.runId || this.generateRunId(),
       strategyName: metadata.strategyName || 'unknown',
-      strategyVersion: this.config.strategyVersion,
+      strategyVersion: this.backtestConfig.strategyVersion,
       startTime: this.startTime,
       endTime: this.endTime,
       symbols: metadata.symbols || [],
       params: metadata.params || {},
-      seed: this.config.seed,
+      seed: this.backtestConfig.seed,
       dataHash: this.calculateDataHash(candles)
     };
     
@@ -221,7 +224,7 @@ export class BacktestEngine extends Engine {
     strategy: (candle: Candle, index: number, state: EngineState) => TradeSignal[]
   ): Promise<void> {
     const currentCandle = candles[barIndex];
-    this.currentBar = barIndex;
+    this.backtestCurrentBar = barIndex;
     
     // Capture positions before any processing
     const positionsBefore = this.getBroker().getPositions().map(p => ({
@@ -239,14 +242,14 @@ export class BacktestEngine extends Engine {
     
     // 1. Execute any pending signals from previous bars
     const executedSignalsThisBar: TradeSignal[] = [];
-    const signalsToExecute = this.pendingSignals.filter(p => p.executeAt === this.currentBar);
+    const signalsToExecute = this.pendingSignals.filter(p => p.executeAt === this.backtestCurrentBar);
     for (const { signal } of signalsToExecute) {
       executedSignalsThisBar.push(signal);
     }
     await this.executePendingSignals(currentCandle);
     
     // 2. Skip warmup period but still log
-    if (barIndex < this.config.warmupBars) {
+    if (barIndex < this.backtestConfig.warmupBars) {
       this.recordDailyEquity(currentCandle);
       
       // Log warmup period (no strategy signals, just market data)
@@ -278,7 +281,7 @@ export class BacktestEngine extends Engine {
     const validSignals = this.validateSignalsWithReasons(newSignals, currentCandle, rejectionReasons);
     
     // 5. Handle signal execution timing
-    if (this.config.executeOnNextBar) {
+    if (this.backtestConfig.executeOnNextBar) {
       // Always queue signals for next bar execution (realistic trading)
       for (const signal of validSignals) {
         this.pendingSignals.push({
@@ -332,11 +335,11 @@ export class BacktestEngine extends Engine {
    * Execute pending signals that were queued from previous bars
    */
   private async executePendingSignals(currentCandle: Candle): Promise<void> {
-    const signalsToExecute = this.pendingSignals.filter(p => p.executeAt === this.currentBar);
-    this.pendingSignals = this.pendingSignals.filter(p => p.executeAt !== this.currentBar);
+    const signalsToExecute = this.pendingSignals.filter(p => p.executeAt === this.backtestCurrentBar);
+    this.pendingSignals = this.pendingSignals.filter(p => p.executeAt !== this.backtestCurrentBar);
     
     if (signalsToExecute.length > 0) {
-      console.log(`Executing ${signalsToExecute.length} pending signals at bar ${this.currentBar} (${new Date(currentCandle.ts).toISOString()})`);
+      console.log(`Executing ${signalsToExecute.length} pending signals at bar ${this.backtestCurrentBar} (${new Date(currentCandle.ts).toISOString()})`);
     }
     
     for (const { signal } of signalsToExecute) {
@@ -360,12 +363,12 @@ export class BacktestEngine extends Engine {
     console.log(`Executing ${signal.side} signal for ${signal.symbol} at ${new Date(candle.ts).toISOString()}, size: ${signal.size.toFixed(4)}`);
     
     // Apply slippage to execution price
-    const slippageMultiplier = 1 + (this.config.slippageBps / 10000) * (signal.side === 'LONG' ? 1 : -1);
+    const slippageMultiplier = 1 + (this.backtestConfig.slippageBps / 10000) * (signal.side === 'LONG' ? 1 : -1);
     const executionPrice = candle.open * slippageMultiplier;
     
     // Check spread constraints
-    if (candle.spread_bps && candle.spread_bps > this.config.maxSpreadBps) {
-      console.warn(`Skipping trade due to wide spread: ${candle.spread_bps} bps > ${this.config.maxSpreadBps} bps`);
+    if (candle.spread_bps && candle.spread_bps > this.backtestConfig.maxSpreadBps) {
+      console.warn(`Skipping trade due to wide spread: ${candle.spread_bps} bps > ${this.backtestConfig.maxSpreadBps} bps`);
       return;
     }
     
@@ -439,8 +442,8 @@ export class BacktestEngine extends Engine {
       }
 
       // Check spread constraints
-      if (candle.spread_bps && candle.spread_bps > this.config.maxSpreadBps) {
-        rejectionReasons.push(`Spread too wide: ${candle.spread_bps} bps > ${this.config.maxSpreadBps} bps`);
+      if (candle.spread_bps && candle.spread_bps > this.backtestConfig.maxSpreadBps) {
+        rejectionReasons.push(`Spread too wide: ${candle.spread_bps} bps > ${this.backtestConfig.maxSpreadBps} bps`);
         return false;
       }
       
@@ -455,7 +458,7 @@ export class BacktestEngine extends Engine {
     const markPrices = { [candle.symbol || 'UNKNOWN']: candle.close };
     const timestamp = new Date(candle.ts).getTime();
     
-    if (this.config.fundingEnabled) {
+    if (this.backtestConfig.fundingEnabled) {
       this.getBroker().updateMarkPrices(markPrices, timestamp);
     } else {
       // Update without funding
@@ -498,7 +501,7 @@ export class BacktestEngine extends Engine {
    * Calculate enhanced performance metrics
    */
   private calculateEnhancedMetrics(result: EngineResult): BacktestMetrics {
-    const initialBalance = this.config.initialBalance;
+    const initialBalance = this.backtestConfig.initialBalance;
     const finalEquity = result.equityCurve[result.equityCurve.length - 1]?.equity || initialBalance;
     
     // Basic return metrics
@@ -507,10 +510,10 @@ export class BacktestEngine extends Engine {
     const annualizedReturn = Math.pow(1 + totalReturn, 365 / tradingDays) - 1;
     
     // Risk metrics
-    const dailyReturns = this.calculateDailyReturns();
-    const sharpeRatio = this.calculateSharpeRatio(dailyReturns);
-    const sortinoRatio = this.calculateSortinoRatio(dailyReturns);
-    const volatility = this.calculateVolatility(dailyReturns);
+    const dailyReturns = this.computeDailyReturns();
+    const sharpeRatio = this.calcSharpeRatioEnhanced(dailyReturns);
+    const sortinoRatio = this.calcSortinoRatioEnhanced(dailyReturns);
+    const volatility = this.calcVolatilityEnhanced(dailyReturns);
     const calmarRatio = Math.abs(totalReturn / result.maxDrawdown);
     
     // Trade metrics
@@ -538,9 +541,9 @@ export class BacktestEngine extends Engine {
       averageLoss: avgLoss,
       largestWin: trades.length > 0 ? Math.max(...trades.map((t: any) => t.pnl)) : 0,
       largestLoss: trades.length > 0 ? Math.min(...trades.map((t: any) => t.pnl)) : 0,
-      timeInMarket: this.calculateTimeInMarket(),
-      averageLeverage: this.calculateAverageLeverage(),
-      maxLeverage: this.calculateMaxLeverage(),
+      timeInMarket: this.computeTimeInMarket(),
+      averageLeverage: this.computeAverageLeverage(),
+      maxLeverage: this.computeMaxLeverage(),
       totalFees: result.totalCommissions,
       totalSlippage: 0, // Would track from execution
       totalFunding: result.totalFunding,
@@ -551,7 +554,7 @@ export class BacktestEngine extends Engine {
   /**
    * Calculate daily returns for risk metrics
    */
-  private calculateDailyReturns(): number[] {
+  private computeDailyReturns(): number[] {
     const dailyReturns: number[] = [];
     const dates = Array.from(this.dailyEquityValues.keys()).sort();
     
@@ -568,11 +571,11 @@ export class BacktestEngine extends Engine {
   /**
    * Calculate Sharpe ratio from daily returns
    */
-  private calculateSharpeRatio(dailyReturns: number[]): number {
+  private calcSharpeRatioEnhanced(dailyReturns: number[]): number {
     if (dailyReturns.length === 0) return 0;
     
     const avgDailyReturn = dailyReturns.reduce((sum, ret) => sum + ret, 0) / dailyReturns.length;
-    const dailyRiskFreeRate = this.config.riskFreeRate / 365; // Convert annual to daily
+    const dailyRiskFreeRate = this.backtestConfig.riskFreeRate / 365; // Convert annual to daily
     const excessReturn = avgDailyReturn - dailyRiskFreeRate;
     
     const variance = dailyReturns.reduce((sum, ret) => sum + Math.pow(ret - avgDailyReturn, 2), 0) / dailyReturns.length;
@@ -584,11 +587,11 @@ export class BacktestEngine extends Engine {
   /**
    * Calculate Sortino ratio (downside deviation)
    */
-  private calculateSortinoRatio(dailyReturns: number[]): number {
+  private calcSortinoRatioEnhanced(dailyReturns: number[]): number {
     if (dailyReturns.length === 0) return 0;
     
     const avgDailyReturn = dailyReturns.reduce((sum, ret) => sum + ret, 0) / dailyReturns.length;
-    const dailyRiskFreeRate = this.config.riskFreeRate / 365;
+    const dailyRiskFreeRate = this.backtestConfig.riskFreeRate / 365;
     const excessReturn = avgDailyReturn - dailyRiskFreeRate;
     
     const downsideReturns = dailyReturns.filter(ret => ret < dailyRiskFreeRate);
@@ -603,7 +606,7 @@ export class BacktestEngine extends Engine {
   /**
    * Calculate volatility (annualized)
    */
-  private calculateVolatility(dailyReturns: number[]): number {
+  private calcVolatilityEnhanced(dailyReturns: number[]): number {
     if (dailyReturns.length === 0) return 0;
     
     const avgReturn = dailyReturns.reduce((sum, ret) => sum + ret, 0) / dailyReturns.length;
@@ -616,7 +619,7 @@ export class BacktestEngine extends Engine {
   /**
    * Calculate drawdown series
    */
-  private calculateDrawdownSeries(equityCurve: any[]): Array<{ timestamp: number; drawdown: number; underwater: boolean }> {
+  private computeDrawdownSeries(equityCurve: any[]): Array<{ timestamp: number; drawdown: number; underwater: boolean }> {
     const drawdowns: Array<{ timestamp: number; drawdown: number; underwater: boolean }> = [];
     let peak = 0;
     
@@ -639,7 +642,7 @@ export class BacktestEngine extends Engine {
   /**
    * Calculate time in market percentage
    */
-  private calculateTimeInMarket(): number {
+  private computeTimeInMarket(): number {
     if (this.positionHistory.length === 0) return 0;
     
     const barsWithPosition = this.positionHistory.filter(p => p.hasPosition).length;
@@ -649,7 +652,7 @@ export class BacktestEngine extends Engine {
   /**
    * Calculate average leverage across all bars with positions
    */
-  private calculateAverageLeverage(): number {
+  private computeAverageLeverage(): number {
     const positionBars = this.positionHistory.filter(p => p.hasPosition);
     if (positionBars.length === 0) return 0;
     
@@ -660,7 +663,7 @@ export class BacktestEngine extends Engine {
   /**
    * Calculate maximum leverage used
    */
-  private calculateMaxLeverage(): number {
+  private computeMaxLeverage(): number {
     if (this.positionHistory.length === 0) return 0;
     
     return Math.max(...this.positionHistory.map(p => p.leverage));
@@ -788,7 +791,7 @@ export class BacktestEngine extends Engine {
         total_equity: accountAfter.totalEquity,
         unrealized_pnl: accountAfter.unrealizedPnl,
         execution_price: executedSignals.length > 0 ? candle.open : undefined,
-        slippage_amount: executedSignals.length > 0 ? (this.config.slippageBps / 10000) * candle.open : undefined,
+        slippage_amount: executedSignals.length > 0 ? (this.backtestConfig.slippageBps / 10000) * candle.open : undefined,
         commission_paid: 0, // Would calculate from executed signals
         funding_paid: 0,    // Would calculate from funding
         strategy_state: strategyState,

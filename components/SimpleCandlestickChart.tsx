@@ -72,7 +72,8 @@ export default function SimpleCandlestickChart({ symbol, startDate, endDate }: S
 
         // Create chart
         addLog('Creating chart instance');
-        const chart = createChart(chartContainerRef.current, {
+        const container = chartContainerRef.current!;
+        const chart = createChart(container, {
           layout: {
             background: { type: ColorType.Solid, color: 'transparent' },
             textColor: '#d1d5db',
@@ -82,7 +83,7 @@ export default function SimpleCandlestickChart({ symbol, startDate, endDate }: S
             vertLines: { color: '#374151' },
             horzLines: { color: '#374151' },
           },
-          width: chartContainerRef.current.clientWidth || 600,
+          width: container.clientWidth || 600,
           height: 400,
         });
 

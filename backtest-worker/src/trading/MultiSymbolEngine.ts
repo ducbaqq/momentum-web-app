@@ -54,11 +54,11 @@ export interface MultiSymbolResult {
 
 export class MultiSymbolBacktestEngine extends BacktestEngine {
   private symbolEngines: Map<string, BacktestEngine> = new Map();
-  private config: MultiSymbolBacktestConfig;
+  private multiConfig: MultiSymbolBacktestConfig;
 
   constructor(config: MultiSymbolBacktestConfig) {
     super(config);
-    this.config = {
+    this.multiConfig = {
       maxConcurrentPositions: 5,
       timeframe: '1m',
       symbolAllocation: {},
@@ -73,7 +73,7 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
     strategy: MultiSymbolStrategy,
     metadata: Partial<BacktestMetadata> = {}
   ): Promise<MultiSymbolResult> {
-    console.log(`Starting multi-symbol backtest for ${this.config.symbols.length} symbols`);
+    console.log(`Starting multi-symbol backtest for ${this.multiConfig.symbols.length} symbols`);
 
     // 1. Load data for all symbols
     const symbolCandles = await this.loadMultiSymbolData();
@@ -105,13 +105,13 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
   private async loadMultiSymbolData(): Promise<MultiSymbolCandles> {
     const symbolCandles: MultiSymbolCandles = {};
     
-    const loadPromises = this.config.symbols.map(async (symbol) => {
+    const loadPromises = this.multiConfig.symbols.map(async (symbol) => {
       try {
         const candles = await DataLoader.loadProfessionalCandles(
           symbol,
-          this.config.startDate,
-          this.config.endDate,
-          this.config.timeframe
+          this.multiConfig.startDate,
+          this.multiConfig.endDate,
+          this.multiConfig.timeframe
         );
         symbolCandles[symbol] = candles;
         console.log(`Loaded ${candles.length} candles for ${symbol}`);
@@ -124,7 +124,7 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
     await Promise.all(loadPromises);
     
     const loadedSymbols = Object.keys(symbolCandles);
-    console.log(`Successfully loaded data for ${loadedSymbols.length}/${this.config.symbols.length} symbols`);
+    console.log(`Successfully loaded data for ${loadedSymbols.length}/${this.multiConfig.symbols.length} symbols`);
     
     return symbolCandles;
   }
@@ -165,7 +165,7 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
       const candlesBySymbol: Record<string, Candle> = {};
       let hasAllSymbols = true;
 
-      for (const symbol of this.config.symbols) {
+      for (const symbol of this.multiConfig.symbols) {
         const candle = symbolLookups[symbol]?.get(timestamp);
         if (candle) {
           candlesBySymbol[symbol] = candle;
@@ -180,7 +180,7 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
       }
     }
 
-    console.log(`Aligned ${alignedData.length} timestamps across ${this.config.symbols.length} symbols`);
+    console.log(`Aligned ${alignedData.length} timestamps across ${this.multiConfig.symbols.length} symbols`);
     return alignedData;
   }
 
@@ -193,15 +193,15 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
     metadata: Partial<BacktestMetadata>
   ): Promise<Record<string, EnhancedBacktestResult>> {
     // Create individual engines for each symbol
-    for (const symbol of this.config.symbols) {
-      const symbolConfig = { ...this.config };
+    for (const symbol of this.multiConfig.symbols) {
+      const symbolConfig: any = { ...this.multiConfig };
       
       // Apply symbol-specific allocation if configured
-      if (this.config.symbolAllocation?.[symbol]) {
-        symbolConfig.initialBalance = this.config.initialBalance * this.config.symbolAllocation[symbol];
+      if (this.multiConfig.symbolAllocation?.[symbol]) {
+        symbolConfig.initialBalance = this.multiConfig.initialBalance * this.multiConfig.symbolAllocation[symbol];
       } else {
         // Equal allocation across symbols
-        symbolConfig.initialBalance = this.config.initialBalance / this.config.symbols.length;
+        symbolConfig.initialBalance = this.multiConfig.initialBalance / this.multiConfig.symbols.length;
       }
 
       this.symbolEngines.set(symbol, new BacktestEngine(symbolConfig));
@@ -274,20 +274,17 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
     // Set the current bar for proper timing
     (engine as any).currentBar = barIndex;
     
-    // Process the signal through the engine's proper execution logic
-    // This ensures proper timing and cost modeling
-    const state = engine.getState(candle);
-    const signals = [signal];
-    
-    // Execute through the engine's proper bar processing
-    engine.processBar(candle, signals);
+      // Process the signal through the engine's proper execution logic
+      // This ensures proper timing and cost modeling
+      const signals = [signal];
+      (engine as any).processBar(candle, signals);
   }
 
   /**
    * Apply position limits to prevent over-concentration
    */
   private applyPositionLimits(signals: TradeSignal[]): TradeSignal[] {
-    if (!this.config.maxConcurrentPositions) {
+    if (!this.multiConfig.maxConcurrentPositions) {
       return signals;
     }
 
@@ -307,7 +304,7 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
       
       if (!hasPosition && signal.size > 0) {
         // This is a new entry
-        if (currentPositions + newPositions < this.config.maxConcurrentPositions!) {
+        if (currentPositions + newPositions < this.multiConfig.maxConcurrentPositions!) {
           filtered.push(signal);
           newPositions++;
         } else {
@@ -394,7 +391,7 @@ export class MultiSymbolBacktestEngine extends BacktestEngine {
     
     // Calculate portfolio-level Sharpe ratio
     const totalPnl = Object.values(results).reduce((sum, r) => sum + r.totalPnl, 0);
-    const totalInitialBalance = Object.values(results).reduce((sum, r) => sum + this.config.initialBalance / symbols.length, 0);
+    const totalInitialBalance = Object.values(results).reduce((sum, r) => sum + this.multiConfig.initialBalance / symbols.length, 0);
     const portfolioReturn = totalPnl / totalInitialBalance;
     
     // Aggregate daily returns (weighted)

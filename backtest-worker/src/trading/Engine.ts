@@ -116,7 +116,7 @@ export class Engine {
   }
 
   // Execute a trading signal
-  private executeSignal(
+  protected executeSignal(
     signal: TradeSignal,
     candle: Candle,
     timestamp: number,
@@ -184,7 +184,7 @@ export class Engine {
   }
 
   // Get current engine state
-  private getState(candle: Candle): EngineState {
+  protected getState(candle: Candle): EngineState {
     const brokerState = this.broker.getState();
     return {
       ...brokerState,
@@ -197,7 +197,7 @@ export class Engine {
   }
 
   // Calculate performance metrics
-  private getResults(): EngineResult {
+  protected getResults(): EngineResult {
     const brokerState = this.broker.getState();
     const initialBalance = this.config.initialBalance;
     const totalPnl = brokerState.totalEquity - initialBalance;

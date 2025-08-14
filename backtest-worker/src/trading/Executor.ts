@@ -12,7 +12,8 @@ export interface L1Snapshot {
 }
 
 export interface ExecutionContext {
-  candle: Candle;
+  // Allow minimal candle shape used in tests while supporting full Candle in production
+  candle: Pick<Candle, 'open' | 'high' | 'low' | 'close' | 'volume'> & Partial<Candle> & { timestamp?: number };
   l1Snapshot?: L1Snapshot;  // If available from l1_snapshots table
   timestamp: number;
 }

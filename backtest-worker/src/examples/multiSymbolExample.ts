@@ -322,6 +322,7 @@ export async function runSingleSymbolWithTimeframes() {
       const config: BacktestConfig = {
         initialBalance: 10000,
         warmupBars: 20,
+        preventLookAhead: true,
         executeOnNextBar: true,
         slippageBps: 2,
         maxSpreadBps: 20,

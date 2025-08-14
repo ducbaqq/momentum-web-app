@@ -198,10 +198,6 @@ export default function OptimizedCandlestickChart({ symbols, startDate, endDate,
             type: 'volume',
           },
           priceScaleId: 'volume',
-          scaleMargins: {
-            top: 0.7, // Volume takes up bottom 30% of chart
-            bottom: 0,
-          },
         });
 
         // Configure volume price scale on the right

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, IChartApi, CandlestickSeriesPartialOptions, HistogramSeriesPartialOptions } from 'lightweight-charts';
+import type { UTCTimestamp } from 'lightweight-charts';
 
 const TF_OPTIONS = [
   { label: '1m', value: '1m', minutes: 1 },
@@ -210,7 +211,7 @@ export default function DetailsPage() {
           // Add data
           console.log('Adding candlestick data...');
           const candleData = candles.map(c => ({ 
-            time: c.time, 
+            time: c.time as UTCTimestamp, 
             open: c.open, 
             high: c.high, 
             low: c.low, 
@@ -220,7 +221,7 @@ export default function DetailsPage() {
           
           console.log('Adding volume data...');
           const volumeData = candles.map((c, i) => ({ 
-            time: c.time, 
+            time: c.time as UTCTimestamp, 
             value: c.volume, 
             color: i === 0 ? '#22c55e' : (c.close >= candles[i-1].close ? '#22c55e' : '#ef4444')
           }));

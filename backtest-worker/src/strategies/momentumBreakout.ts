@@ -38,8 +38,8 @@ export async function runStrategy(
     if (position) {
       // Exit based on PREVIOUS bar's indicators (no lookahead bias)
       // Only consider exit if we have the required indicator data
-      const shouldExit = (cPrev.roc_1m !== null && cPrev.roc_1m < 0) || 
-                        (cPrev.rsi_14 !== null && cPrev.rsi_14 > 75);
+      const shouldExit = ((cPrev.roc_1m ?? null) !== null && (cPrev.roc_1m as number) < 0) || 
+                        ((cPrev.rsi_14 ?? null) !== null && (cPrev.rsi_14 as number) > 75);
       
       if (shouldExit) {
         position.exitPx = openPx * (1 - bps(ctx.slippageBps));
@@ -62,7 +62,7 @@ export async function runStrategy(
 
     // Entry rules - use PREVIOUS bar data to generate entry signals (no lookahead bias)
     // Only trade if we have all required indicator data from previous bar
-    if (cPrev.spread_bps === null || cPrev.vol_mult === null || cPrev.roc_5m === null) {
+    if (cPrev.spread_bps === null || cPrev.spread_bps === undefined || cPrev.vol_mult === null || cPrev.vol_mult === undefined || cPrev.roc_5m === null || cPrev.roc_5m === undefined) {
       // Skip this bar if indicators are missing
       continue;
     }

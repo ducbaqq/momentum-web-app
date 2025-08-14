@@ -70,7 +70,7 @@ class FakeTrader {
       const now = new Date();
       
       for (const run of activeRuns) {
-        const lastUpdate = new Date(run.last_update);
+        const lastUpdate = new Date(run.last_update || now.toISOString());
         const minutesSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
         
         // If last update was more than 5 minutes ago, we missed at least some cycles
@@ -175,7 +175,7 @@ class FakeTrader {
     
     // Check if new 15m candles are available for entry signal evaluation
     const lastProcessedCandle = await getLastProcessedCandle(run.run_id);
-    const hasNewCandles = await hasNew15mCandles(run.symbols, lastProcessedCandle);
+    const hasNewCandles = await hasNew15mCandles(run.symbols, lastProcessedCandle || undefined);
     
     if (hasNewCandles) {
       console.log(`   📊 New 15m candle(s) available - evaluating entry signals`);
@@ -210,7 +210,7 @@ class FakeTrader {
     }
     
     // Update run's last update timestamp and check if winding down run should be stopped
-    if (run.status === 'winding_down') {
+    if ((run.status as any) === 'winding_down') {
       // Get current positions to check if all are closed
       const allPositions = await getCurrentPositions(run.run_id);
       const openPositionsCount = allPositions.filter(p => p.status === 'open').length;
@@ -247,7 +247,8 @@ class FakeTrader {
       const marketValue = position.size * livePrice;
       await updatePosition(position.position_id, livePrice, unrealizedPnl, marketValue);
       
-      console.log(`   📊 Updated ${position.symbol}: $${position.current_price.toFixed(2)} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
+      const prevPrice = position.current_price ?? position.entry_price;
+      console.log(`   📊 Updated ${position.symbol}: $${prevPrice.toFixed(2)} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
       
       // Check for stop loss / take profit triggers using live prices
       await this.checkExitConditions(run, position, livePrice);
@@ -317,7 +318,7 @@ class FakeTrader {
     // Execute entry signals (but skip if winding down)
     for (const signal of signals) {
       // If run is winding down, only allow exit signals
-      if (run.status === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
+      if ((run.status as any) === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
         console.log(`     🚫 Skipping entry signal for ${signal.symbol} - run is winding down`);
         
         // Log the skipped signal
@@ -393,7 +394,7 @@ class FakeTrader {
     // Execute signals (but skip entry signals if winding down)
     for (const signal of signals) {
       // If run is winding down, only allow exit signals
-      if (run.status === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
+      if ((run.status as any) === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
         console.log(`     🚫 Skipping entry signal for ${signal.symbol} - run is winding down`);
         
         // Log the skipped signal

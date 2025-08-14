@@ -86,7 +86,7 @@ export async function GET(
         symbols = JSON.parse(run.symbols);
       } catch {
         // If not JSON, treat as comma-separated string
-        symbols = run.symbols.split(',').map(s => s.trim()).filter(s => s);
+        symbols = run.symbols.split(',').map((s: string) => s.trim()).filter((s: string) => s);
       }
     }
 

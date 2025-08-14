@@ -210,7 +210,7 @@ export default function BacktestDetailsPage() {
     get durationYears(): number { return this.durationDays / 365.25; },
     get startingCapital(): number { 
       // Try to get starting capital from run params, fallback to 10000
-      const capital = run.params?.starting_capital || run.starting_capital || 10000;
+      const capital = run.params?.starting_capital || 10000;
       return Math.max(capital, 1); // Prevent zero capital
     },
     get totalReturn(): number { 

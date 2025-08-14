@@ -107,12 +107,17 @@ export function aggregateCandles(candles: Candle[], targetTimeframe: Timeframe):
       book_imb: last.book_imb,
       spread_bps: last.spread_bps,
       
-      // For professional candles
-      symbol: first.symbol,
-      markPrice: last.markPrice,
-      fundingRate: last.fundingRate,
-      openInterest: last.openInterest,
-      l1Snapshot: last.l1Snapshot
+      // Professional fields (if present in source)
+      symbol: (first as any).symbol,
+      // Keep only fields that exist on Candle's extended types
+      // @ts-expect-error: Optional passthrough when present
+      markPrice: (last as any).markPrice,
+      // @ts-ignore
+      fundingRate: (last as any).fundingRate,
+      // @ts-ignore
+      openInterest: (last as any).openInterest,
+      // @ts-ignore
+      l1Snapshot: (last as any).l1Snapshot
     };
 
     aggregated.push(aggregatedCandle);

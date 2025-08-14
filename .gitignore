@@ -57,3 +57,6 @@ coverage/
 
 # ESLint
 .eslintcache
+
+backtest-worker/dist
+fake-trader/dist
