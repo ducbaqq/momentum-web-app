@@ -57,24 +57,33 @@ export async function getLivePrices(symbols: string[]): Promise<Record<string, n
   return prices;
 }
 
-// Get completed 15m candle data for entry signals
+// Get completed 15m candle data for entry signals (using 1m data aggregated to 15m intervals)
 export async function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle>> {
   const query = `
-    WITH latest_15m_candles AS (
+    WITH aggregated_15m_candles AS (
+      SELECT 
+        symbol,
+        date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) as candle_start,
+        FIRST_VALUE(open::double precision) OVER (PARTITION BY symbol, date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) ORDER BY ts ASC) as open,
+        MAX(high::double precision) as high,
+        MIN(low::double precision) as low,
+        LAST_VALUE(close::double precision) OVER (PARTITION BY symbol, date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) ORDER BY ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as close,
+        SUM(volume::double precision) as volume
+      FROM ohlcv_1m 
+      WHERE symbol = ANY($1)
+      AND ts <= NOW() - INTERVAL '15 minutes'  -- Only completed 15m periods
+      AND ts >= NOW() - INTERVAL '2 hours'     -- Look back 2 hours
+      GROUP BY symbol, candle_start
+    ),
+    latest_15m_candles AS (
       SELECT DISTINCT ON (symbol) 
         symbol,
-        ts,
-        open::double precision AS open,
-        high::double precision AS high,
-        low::double precision AS low,
-        close::double precision AS close,
-        volume::double precision AS volume
-      FROM ohlcv_15m 
-      WHERE symbol = ANY($1)
-      AND ts <= NOW() - INTERVAL '15 minutes'  -- Only completed 15m candles
-      ORDER BY symbol, ts DESC
+        candle_start as ts,
+        open, high, low, close, volume
+      FROM aggregated_15m_candles
+      ORDER BY symbol, candle_start DESC
     ),
-    latest_15m_features AS (
+    latest_1m_features AS (
       SELECT DISTINCT ON (symbol)
         symbol,
         ts,
@@ -82,9 +91,9 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
         rsi_14, ema_20, ema_50,
         macd, macd_signal, bb_upper, bb_lower,
         vol_avg_20, vol_mult, book_imb, spread_bps
-      FROM features_15m
+      FROM features_1m
       WHERE symbol = ANY($1)
-      AND ts <= NOW() - INTERVAL '15 minutes'  -- Match completed candles
+      AND ts <= NOW() - INTERVAL '15 minutes'
       ORDER BY symbol, ts DESC
     )
     SELECT 
@@ -94,7 +103,7 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
       f.macd, f.macd_signal, f.bb_upper, f.bb_lower,
       f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
     FROM latest_15m_candles c
-    LEFT JOIN latest_15m_features f ON f.symbol = c.symbol AND f.ts = c.ts
+    LEFT JOIN latest_1m_features f ON f.symbol = c.symbol AND ABS(EXTRACT(EPOCH FROM (f.ts - c.ts))) < 900  -- Within 15 minutes
   `;
   
   const result = await pool.query(query, [symbols]);
@@ -132,16 +141,22 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
   return candles;
 }
 
-// Check if new 15m candles are available since last check
+// Check if new 15m candles are available since last check (using 1m data)
 export async function hasNew15mCandles(symbols: string[], lastCheckTime?: string): Promise<boolean> {
   const timeThreshold = lastCheckTime || new Date(Date.now() - 16 * 60 * 1000).toISOString(); // Default: 16 minutes ago
   
   const query = `
-    SELECT COUNT(*) as new_count
-    FROM ohlcv_15m
-    WHERE symbol = ANY($1)
-    AND ts > $2
-    AND ts <= NOW() - INTERVAL '15 minutes'  -- Only completed candles
+    WITH current_15m_periods AS (
+      SELECT DISTINCT
+        symbol,
+        date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) as period_start
+      FROM ohlcv_1m
+      WHERE symbol = ANY($1)
+      AND ts > $2
+      AND ts <= NOW() - INTERVAL '15 minutes'  -- Only completed 15m periods
+    )
+    SELECT COUNT(DISTINCT period_start) as new_count
+    FROM current_15m_periods
   `;
   
   const result = await pool.query(query, [symbols, timeThreshold]);
