@@ -60,19 +60,33 @@ export async function getLivePrices(symbols: string[]): Promise<Record<string, n
 // Get completed 15m candle data for entry signals (using 1m data aggregated to 15m intervals)
 export async function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle>> {
   const query = `
-    WITH aggregated_15m_candles AS (
+    WITH raw_1m_data AS (
       SELECT 
         symbol,
+        ts,
+        open::double precision as open,
+        high::double precision as high,
+        low::double precision as low,
+        close::double precision as close,
+        volume::double precision as volume,
         date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) as candle_start,
-        FIRST_VALUE(open::double precision) OVER (PARTITION BY symbol, date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) ORDER BY ts ASC) as open,
-        MAX(high::double precision) as high,
-        MIN(low::double precision) as low,
-        LAST_VALUE(close::double precision) OVER (PARTITION BY symbol, date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) ORDER BY ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as close,
-        SUM(volume::double precision) as volume
+        ROW_NUMBER() OVER (PARTITION BY symbol, date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) ORDER BY ts ASC) as rn_asc,
+        ROW_NUMBER() OVER (PARTITION BY symbol, date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) ORDER BY ts DESC) as rn_desc
       FROM ohlcv_1m 
       WHERE symbol = ANY($1)
       AND ts <= NOW() - INTERVAL '15 minutes'  -- Only completed 15m periods
       AND ts >= NOW() - INTERVAL '2 hours'     -- Look back 2 hours
+    ),
+    aggregated_15m_candles AS (
+      SELECT 
+        symbol,
+        candle_start,
+        MAX(CASE WHEN rn_asc = 1 THEN open END) as open,
+        MAX(high) as high,
+        MIN(low) as low,
+        MAX(CASE WHEN rn_desc = 1 THEN close END) as close,
+        SUM(volume) as volume
+      FROM raw_1m_data
       GROUP BY symbol, candle_start
     ),
     latest_15m_candles AS (
