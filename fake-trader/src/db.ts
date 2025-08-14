@@ -90,12 +90,16 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
       GROUP BY symbol, candle_start
     ),
     latest_15m_candles AS (
-      SELECT DISTINCT ON (symbol) 
+      SELECT  
         symbol,
         candle_start as ts,
-        open, high, low, close, volume
+        open, high, low, close, volume,
+        ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY candle_start DESC) as rn
       FROM aggregated_15m_candles
       ORDER BY symbol, candle_start DESC
+    ),
+    current_candle AS (
+      SELECT * FROM latest_15m_candles WHERE rn = 1
     ),
     latest_1m_features AS (
       SELECT DISTINCT ON (symbol)
@@ -116,7 +120,7 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
       f.rsi_14, f.ema_20, f.ema_50,
       f.macd, f.macd_signal, f.bb_upper, f.bb_lower,
       f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
-    FROM latest_15m_candles c
+    FROM current_candle c
     LEFT JOIN latest_1m_features f ON f.symbol = c.symbol AND ABS(EXTRACT(EPOCH FROM (f.ts - c.ts))) < 900  -- Within 15 minutes
   `;
   
