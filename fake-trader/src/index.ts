@@ -248,7 +248,7 @@ class FakeTrader {
       await updatePosition(position.position_id, livePrice, unrealizedPnl, marketValue);
       
       const prevPrice = position.current_price ?? position.entry_price;
-      console.log(`   📊 Updated ${position.symbol}: $${prevPrice.toFixed(2)} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
+      console.log(`   📊 Updated ${position.symbol}: $${prevPrice?.toFixed(2) ?? 'N/A'} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
       
       // Check for stop loss / take profit triggers using live prices
       await this.checkExitConditions(run, position, livePrice);
