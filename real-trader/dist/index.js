@@ -1,0 +1,544 @@
+import dotenv from 'dotenv';
+import cron from 'node-cron';
+import { BinanceClient } from './binanceClient.js';
+import { testConnection, getActiveRuns, getCompleted15mCandles, hasNew15mCandles, getLastProcessedCandle, updateLastProcessedCandle, getCurrentPositions, createTrade, createPosition, updatePosition, closePosition, logSignal, updateRunStatus, updateRunCapital, getTodaysPnL, getMaxDrawdown } from './db.js';
+import { getStrategy } from './strategies.js';
+// Load environment variables
+dotenv.config();
+class RealTrader {
+    running = false;
+    binanceClient;
+    constructor(binanceConfig) {
+        this.binanceClient = new BinanceClient(binanceConfig);
+    }
+    async start() {
+        console.log('🚀 Starting Real Trader...');
+        console.log(`📊 Mode: ${this.binanceClient['config'].testnet ? 'TESTNET' : 'MAINNET'}`);
+        // Test database and Binance connections
+        await testConnection();
+        const binanceConnected = await this.binanceClient.testConnection();
+        if (!binanceConnected) {
+            throw new Error('Failed to connect to Binance API');
+        }
+        // Verify account info
+        await this.verifyAccountSetup();
+        // Check for downtime recovery
+        await this.handleDowntimeRecovery();
+        // Schedule trading execution every 1 minute
+        cron.schedule('* * * * *', async () => {
+            if (this.running) {
+                console.log('⏰ Previous execution still running, skipping...');
+                return;
+            }
+            this.running = true;
+            try {
+                await this.executeTradingCycle();
+            }
+            catch (error) {
+                console.error('❌ Trading cycle error:', error);
+            }
+            finally {
+                this.running = false;
+            }
+        });
+        console.log('⏰ Real Trader scheduled to run every 1 minute');
+        console.log('📊 Watching for active trading runs...');
+        // Run initial cycle
+        await this.executeTradingCycle();
+    }
+    async verifyAccountSetup() {
+        try {
+            const accountInfo = await this.binanceClient.getAccountInfo();
+            console.log(`💰 Account Balance: $${parseFloat(accountInfo.totalWalletBalance).toFixed(2)}`);
+            console.log(`💵 Available Balance: $${parseFloat(accountInfo.availableBalance).toFixed(2)}`);
+            // Check for existing positions
+            const positions = await this.binanceClient.getPositions();
+            if (positions.length > 0) {
+                console.log(`📍 Found ${positions.length} existing Binance positions:`);
+                for (const pos of positions) {
+                    console.log(`   ${pos.symbol}: ${pos.positionSide} ${pos.positionAmt} @ $${parseFloat(pos.entryPrice).toFixed(2)}`);
+                }
+            }
+        }
+        catch (error) {
+            console.error('❌ Failed to verify account setup:', error);
+            throw error;
+        }
+    }
+    async handleDowntimeRecovery() {
+        console.log('🔍 Checking for downtime recovery...');
+        try {
+            // Get active runs and check their last update times
+            const activeRuns = await getActiveRuns();
+            const now = new Date();
+            for (const run of activeRuns) {
+                const lastUpdate = new Date(run.last_update || now.toISOString());
+                const minutesSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
+                // If last update was more than 5 minutes ago, we missed at least some cycles
+                if (minutesSinceUpdate > 5) {
+                    console.log(`⚠️  Run ${run.run_id} missed ${Math.floor(minutesSinceUpdate)} cycles during downtime`);
+                    // Sync positions with Binance
+                    await this.syncPositionsWithBinance(run);
+                    // Log the recovery event
+                    await logSignal({
+                        run_id: run.run_id,
+                        symbol: 'SYSTEM',
+                        signal_type: 'adjustment',
+                        rejection_reason: `System recovery after ${minutesSinceUpdate.toFixed(1)} minutes downtime`,
+                        executed: false,
+                        signal_ts: now.toISOString()
+                    });
+                }
+            }
+            console.log(`✅ Downtime recovery completed for ${activeRuns.length} active runs`);
+        }
+        catch (error) {
+            console.error('❌ Downtime recovery failed:', error);
+        }
+    }
+    async syncPositionsWithBinance(run) {
+        try {
+            console.log(`🔄 Syncing positions with Binance for run ${run.run_id}`);
+            // Get current positions from database
+            const dbPositions = await getCurrentPositions(run.run_id);
+            // Get current positions from Binance
+            const binancePositions = await this.binanceClient.getPositions();
+            // Sync each symbol
+            for (const symbol of run.symbols) {
+                const dbPos = dbPositions.find(p => p.symbol === symbol);
+                const binancePos = binancePositions.find(p => p.symbol === symbol);
+                if (dbPos && !binancePos) {
+                    // Position exists in DB but not in Binance - mark as closed
+                    console.log(`   📍 Closing stale DB position for ${symbol}`);
+                    const currentPrice = await this.binanceClient.getCurrentPrice(symbol);
+                    const realizedPnl = this.calculateRealizedPnL(dbPos, currentPrice);
+                    await closePosition(dbPos.position_id, currentPrice, realizedPnl);
+                }
+                else if (!dbPos && binancePos && parseFloat(binancePos.positionAmt) !== 0) {
+                    // Position exists in Binance but not in DB - create DB record
+                    console.log(`   📍 Creating DB record for Binance position ${symbol}`);
+                    // This is a complex case - we'll log it for manual review
+                    await logSignal({
+                        run_id: run.run_id,
+                        symbol: symbol,
+                        signal_type: 'adjustment',
+                        rejection_reason: 'Binance position found without DB record - manual review required',
+                        executed: false,
+                        signal_ts: new Date().toISOString()
+                    });
+                }
+                else if (dbPos && binancePos) {
+                    // Position exists in both - update prices
+                    const currentPrice = parseFloat(binancePos.markPrice);
+                    const unrealizedPnl = parseFloat(binancePos.unRealizedProfit);
+                    const marketValue = Math.abs(parseFloat(binancePos.positionAmt)) * currentPrice;
+                    await updatePosition(dbPos.position_id, currentPrice, unrealizedPnl, marketValue);
+                    console.log(`   📊 Synced ${symbol}: $${dbPos.current_price} → $${currentPrice.toFixed(2)} (P&L: ${unrealizedPnl.toFixed(2)})`);
+                }
+            }
+        }
+        catch (error) {
+            console.error(`❌ Failed to sync positions for run ${run.run_id}:`, error);
+        }
+    }
+    async executeTradingCycle() {
+        console.log(`\n🔄 [${new Date().toISOString()}] Executing trading cycle...`);
+        // Get all active trading runs
+        const activeRuns = await getActiveRuns();
+        if (activeRuns.length === 0) {
+            console.log('📭 No active trading runs found');
+            return;
+        }
+        console.log(`📈 Processing ${activeRuns.length} active trading runs`);
+        for (const run of activeRuns) {
+            try {
+                await this.processRun(run);
+            }
+            catch (error) {
+                console.error(`❌ Error processing run ${run.run_id}:`, error.message);
+                await updateRunStatus(run.run_id, 'error', error.message);
+            }
+        }
+        console.log('✅ Trading cycle completed');
+    }
+    async processRun(run) {
+        console.log(`\n🎯 Processing run: ${run.name || run.run_id}`);
+        console.log(`   Strategy: ${run.strategy_name}`);
+        console.log(`   Symbols: ${run.symbols.join(', ')}`);
+        console.log(`   Capital: $${run.current_capital}`);
+        console.log(`   Mode: ${run.testnet ? 'TESTNET' : 'MAINNET'}`);
+        // Risk management checks
+        const riskCheckPassed = await this.checkRiskLimits(run);
+        if (!riskCheckPassed) {
+            console.log(`   ⚠️  Risk limits exceeded, skipping run`);
+            return;
+        }
+        // Get live prices from Binance for position management
+        const livePrices = await this.binanceClient.getCurrentPrices(run.symbols);
+        // Update existing positions with current prices
+        await this.updateExistingPositions(run, livePrices);
+        // Check if new 15m candles are available for entry signal evaluation
+        const lastProcessedCandle = await getLastProcessedCandle(run.run_id);
+        const hasNewCandles = await hasNew15mCandles(run.symbols, lastProcessedCandle || undefined);
+        if (hasNewCandles) {
+            console.log(`   📊 New 15m candle(s) available - evaluating entry signals`);
+            // Get completed 15m candles for entry signal evaluation
+            const completed15mCandles = await getCompleted15mCandles(run.symbols);
+            // Check if we have data for all symbols
+            const missingData = run.symbols.filter(symbol => !completed15mCandles[symbol]);
+            if (missingData.length > 0) {
+                console.log(`⚠️  Missing 15m candle data for symbols: ${missingData.join(', ')}`);
+            }
+            // Get strategy function
+            const strategy = getStrategy(run.strategy_name);
+            // Process each symbol for entry signals
+            for (const symbol of run.symbols) {
+                const candle = completed15mCandles[symbol];
+                if (!candle) {
+                    console.log(`⏭️  Skipping ${symbol} - no 15m candle data`);
+                    continue;
+                }
+                await this.processSymbolEntrySignals(run, symbol, candle, strategy);
+                // Update last processed candle timestamp
+                await updateLastProcessedCandle(run.run_id, candle.ts);
+            }
+        }
+        else {
+            console.log(`   ⏸️  No new 15m candles - only updating positions with live prices`);
+        }
+        // Update run's last update timestamp and check if winding down run should be stopped
+        if (run.status === 'winding_down') {
+            // Get current positions to check if all are closed
+            const allPositions = await getCurrentPositions(run.run_id);
+            const openPositionsCount = allPositions.filter(p => p.status === 'open').length;
+            if (openPositionsCount === 0) {
+                console.log(`✅ All positions closed for winding down run ${run.run_id}, stopping run`);
+                await updateRunStatus(run.run_id, 'stopped', 'All positions closed during wind down');
+            }
+            else {
+                console.log(`🔄 Winding down run ${run.run_id} has ${openPositionsCount} open positions remaining`);
+                await updateRunStatus(run.run_id, 'winding_down');
+            }
+        }
+        else {
+            await updateRunStatus(run.run_id, 'active');
+        }
+    }
+    async checkRiskLimits(run) {
+        try {
+            // Check daily loss limit
+            const todaysPnL = await getTodaysPnL(run.run_id);
+            const dailyLossPct = (todaysPnL / run.starting_capital) * 100;
+            if (dailyLossPct < -run.daily_loss_limit_pct) {
+                await updateRunStatus(run.run_id, 'paused', `Daily loss limit exceeded: ${dailyLossPct.toFixed(2)}%`);
+                return false;
+            }
+            // Check max drawdown limit
+            const maxDrawdown = await getMaxDrawdown(run.run_id);
+            if (maxDrawdown > run.max_drawdown_pct) {
+                await updateRunStatus(run.run_id, 'paused', `Max drawdown exceeded: ${maxDrawdown.toFixed(2)}%`);
+                return false;
+            }
+            // Check available balance on Binance
+            const availableBalance = await this.binanceClient.getAvailableBalance();
+            if (availableBalance < 100) { // Minimum $100 balance
+                await updateRunStatus(run.run_id, 'paused', `Insufficient balance: $${availableBalance.toFixed(2)}`);
+                return false;
+            }
+            return true;
+        }
+        catch (error) {
+            console.error(`Failed to check risk limits for run ${run.run_id}:`, error);
+            return false;
+        }
+    }
+    async updateExistingPositions(run, livePrices) {
+        const positions = await getCurrentPositions(run.run_id);
+        if (positions.length === 0) {
+            return;
+        }
+        console.log(`   📍 Updating ${positions.length} open positions with live prices`);
+        for (const position of positions) {
+            const livePrice = livePrices[position.symbol];
+            if (!livePrice) {
+                console.log(`   ⚠️  No live price for ${position.symbol}, keeping current price`);
+                continue;
+            }
+            const unrealizedPnl = this.calculateUnrealizedPnL(position, livePrice);
+            const marketValue = Math.abs(position.size) * livePrice;
+            await updatePosition(position.position_id, livePrice, unrealizedPnl, marketValue);
+            const prevPrice = position.current_price ?? position.entry_price;
+            console.log(`   📊 Updated ${position.symbol}: $${prevPrice.toFixed(2)} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
+            // Check for stop loss / take profit triggers using live prices
+            await this.checkExitConditions(run, position, livePrice);
+        }
+    }
+    async checkExitConditions(run, position, currentPrice) {
+        let shouldExit = false;
+        let exitReason = '';
+        // Check stop loss
+        if (position.stop_loss &&
+            ((position.side === 'LONG' && currentPrice <= position.stop_loss) ||
+                (position.side === 'SHORT' && currentPrice >= position.stop_loss))) {
+            shouldExit = true;
+            exitReason = 'stop_loss_trigger';
+        }
+        // Check take profit
+        if (position.take_profit &&
+            ((position.side === 'LONG' && currentPrice >= position.take_profit) ||
+                (position.side === 'SHORT' && currentPrice <= position.take_profit))) {
+            shouldExit = true;
+            exitReason = 'take_profit_trigger';
+        }
+        if (shouldExit) {
+            console.log(`   🎯 Exit triggered for ${position.symbol}: ${exitReason} at $${currentPrice.toFixed(2)}`);
+            try {
+                // Place exit order on Binance
+                const exitSide = position.side === 'LONG' ? 'SELL' : 'BUY';
+                const orderResponse = await this.binanceClient.placeFuturesMarketOrder(position.symbol, exitSide, Math.abs(position.size), {
+                    positionSide: position.binance_position_side || position.side
+                });
+                const realizedPnl = this.calculateRealizedPnL(position, currentPrice);
+                const fees = orderResponse.fills.reduce((sum, fill) => sum + parseFloat(fill.commission), 0);
+                await closePosition(position.position_id, currentPrice, realizedPnl);
+                // Update run capital
+                const newCapital = run.current_capital + realizedPnl - fees;
+                await updateRunCapital(run.run_id, newCapital);
+                run.current_capital = newCapital; // Update local copy
+                console.log(`   ✅ Closed ${position.symbol} position: P&L $${realizedPnl.toFixed(2)} (fees: $${fees.toFixed(2)})`);
+                // Log successful exit
+                await logSignal({
+                    run_id: run.run_id,
+                    symbol: position.symbol,
+                    signal_type: 'exit',
+                    side: position.side,
+                    size: position.size,
+                    executed: true,
+                    execution_price: currentPrice,
+                    execution_notes: `${exitReason} executed`,
+                    binance_order_id: Number(orderResponse.orderId),
+                    binance_response: orderResponse,
+                    signal_ts: new Date().toISOString()
+                });
+            }
+            catch (error) {
+                console.error(`   ❌ Failed to execute exit for ${position.symbol}:`, error.message);
+                // Log failed exit
+                await logSignal({
+                    run_id: run.run_id,
+                    symbol: position.symbol,
+                    signal_type: 'exit',
+                    side: position.side,
+                    size: position.size,
+                    executed: false,
+                    execution_notes: `Exit failed: ${error.message}`,
+                    signal_ts: new Date().toISOString()
+                });
+            }
+        }
+    }
+    async processSymbolEntrySignals(run, symbol, candle, strategy) {
+        console.log(`\n  📊 Evaluating entry signals for ${symbol} @ $${candle.close} (15m candle: ${candle.ts})`);
+        // Get current positions for this symbol
+        const positions = await getCurrentPositions(run.run_id);
+        const symbolPositions = positions.filter(p => p.symbol === symbol);
+        // Prepare strategy state
+        const strategyState = {
+            runId: run.run_id,
+            symbol: symbol,
+            currentCapital: run.current_capital,
+            positions: symbolPositions
+        };
+        // Generate trading signals
+        const signals = strategy(candle, strategyState, run.params);
+        // Execute entry signals (but skip if winding down)
+        for (const signal of signals) {
+            // If run is winding down, only allow exit signals
+            if (run.status === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
+                console.log(`     🚫 Skipping entry signal for ${signal.symbol} - run is winding down`);
+                // Log the skipped signal
+                await logSignal({
+                    run_id: run.run_id,
+                    symbol: signal.symbol,
+                    signal_type: 'entry',
+                    side: signal.side,
+                    size: signal.size,
+                    price: signal.price,
+                    candle_data: candle,
+                    executed: false,
+                    rejection_reason: 'winding_down_no_new_positions',
+                    signal_ts: new Date().toISOString()
+                });
+                continue; // Skip this signal
+            }
+            // Only process entry signals here (exit signals handled in position management)
+            if (signal.side === 'LONG' || signal.side === 'SHORT') {
+                await this.executeEntrySignal(run, signal, candle);
+            }
+        }
+        // Log signal for debugging (even if no signals)
+        if (signals.length === 0) {
+            await logSignal({
+                run_id: run.run_id,
+                symbol: symbol,
+                signal_type: 'entry',
+                candle_data: candle,
+                strategy_state: strategyState,
+                rejection_reason: 'no_entry_signal_generated',
+                executed: false,
+                signal_ts: new Date().toISOString()
+            });
+        }
+    }
+    async executeEntrySignal(run, signal, candle) {
+        console.log(`     🎯 Entry Signal: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${candle.close} (${signal.reason})`);
+        try {
+            // Check position size limits
+            const positionValueUsd = signal.size * candle.close;
+            if (positionValueUsd > run.max_position_size_usd) {
+                const adjustedSize = run.max_position_size_usd / candle.close;
+                console.log(`     📏 Position size adjusted: ${signal.size.toFixed(4)} → ${adjustedSize.toFixed(4)} (max position size limit)`);
+                signal.size = adjustedSize;
+            }
+            // Get minimum order size and format quantity
+            const { minQty, stepSize } = await this.binanceClient.getMinOrderSize(signal.symbol);
+            const formattedSize = this.binanceClient.formatQuantity(signal.symbol, signal.size, stepSize);
+            if (formattedSize < minQty) {
+                console.log(`     📏 Position size too small: ${formattedSize} < ${minQty}, skipping`);
+                await logSignal({
+                    run_id: run.run_id,
+                    symbol: signal.symbol,
+                    signal_type: 'entry',
+                    side: signal.side,
+                    size: signal.size,
+                    price: signal.price,
+                    candle_data: candle,
+                    executed: false,
+                    execution_notes: `Position size below minimum: ${formattedSize} < ${minQty}`,
+                    signal_ts: new Date().toISOString()
+                });
+                return;
+            }
+            // Place order on Binance
+            const orderSide = signal.side === 'LONG' ? 'BUY' : 'SELL';
+            const orderResponse = await this.binanceClient.placeFuturesMarketOrder(signal.symbol, orderSide, formattedSize, {
+                leverage: signal.leverage || 1,
+                marginType: 'cross',
+                positionSide: signal.side
+            });
+            const executionPrice = parseFloat(orderResponse.price) || candle.close;
+            const executedQty = parseFloat(orderResponse.executedQty);
+            const fees = orderResponse.fills.reduce((sum, fill) => sum + parseFloat(fill.commission), 0);
+            // Create new trade and position records
+            const tradeId = await createTrade({
+                run_id: run.run_id,
+                symbol: signal.symbol,
+                side: signal.side,
+                entry_ts: new Date().toISOString(),
+                qty: executedQty,
+                entry_px: executionPrice,
+                realized_pnl: 0,
+                unrealized_pnl: 0,
+                fees: fees,
+                binance_order_id: Number(orderResponse.orderId),
+                binance_client_order_id: orderResponse.clientOrderId,
+                reason: signal.reason,
+                leverage: signal.leverage || 1,
+                status: 'open'
+            });
+            await createPosition({
+                run_id: run.run_id,
+                symbol: signal.symbol,
+                side: signal.side,
+                size: signal.side === 'LONG' ? executedQty : -executedQty,
+                entry_price: executionPrice,
+                current_price: executionPrice,
+                unrealized_pnl: 0,
+                cost_basis: executedQty * executionPrice,
+                market_value: executedQty * executionPrice,
+                stop_loss: signal.stopLoss,
+                take_profit: signal.takeProfit,
+                leverage: signal.leverage || 1,
+                binance_position_side: signal.side,
+                binance_margin_type: 'cross',
+                status: 'open'
+            });
+            console.log(`     ✅ Opened ${signal.side} position: ${tradeId.substring(0, 8)}... (Binance ID: ${orderResponse.orderId})`);
+            // Log successful signal execution
+            await logSignal({
+                run_id: run.run_id,
+                symbol: signal.symbol,
+                signal_type: 'entry',
+                side: signal.side,
+                size: executedQty,
+                price: signal.price,
+                candle_data: candle,
+                executed: true,
+                execution_price: executionPrice,
+                execution_notes: `Executed ${signal.reason}`,
+                binance_order_id: Number(orderResponse.orderId),
+                binance_response: orderResponse,
+                signal_ts: new Date().toISOString()
+            });
+        }
+        catch (error) {
+            console.error(`     ❌ Entry signal execution failed:`, error.message);
+            // Log failed signal execution
+            await logSignal({
+                run_id: run.run_id,
+                symbol: signal.symbol,
+                signal_type: 'entry',
+                side: signal.side,
+                size: signal.size,
+                price: signal.price,
+                candle_data: candle,
+                executed: false,
+                execution_notes: `Execution failed: ${error.message}`,
+                signal_ts: new Date().toISOString()
+            });
+        }
+    }
+    calculateUnrealizedPnL(position, currentPrice) {
+        if (position.side === 'LONG') {
+            return (currentPrice - position.entry_price) * Math.abs(position.size);
+        }
+        else {
+            return (position.entry_price - currentPrice) * Math.abs(position.size);
+        }
+    }
+    calculateRealizedPnL(position, exitPrice) {
+        if (position.side === 'LONG') {
+            return (exitPrice - position.entry_price) * Math.abs(position.size);
+        }
+        else {
+            return (position.entry_price - exitPrice) * Math.abs(position.size);
+        }
+    }
+}
+// Main execution
+async function main() {
+    // Validate required environment variables
+    const requiredEnvVars = ['DATABASE_URL', 'BINANCE_API_KEY', 'BINANCE_API_SECRET'];
+    const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+    if (missingEnvVars.length > 0) {
+        console.error(`❌ Missing required environment variables: ${missingEnvVars.join(', ')}`);
+        process.exit(1);
+    }
+    const binanceConfig = {
+        apiKey: process.env.BINANCE_API_KEY,
+        apiSecret: process.env.BINANCE_API_SECRET,
+        testnet: process.env.BINANCE_TESTNET === 'true' || true, // Default to testnet for safety
+    };
+    const trader = new RealTrader(binanceConfig);
+    try {
+        await trader.start();
+    }
+    catch (error) {
+        console.error('💥 Failed to start real trader:', error);
+        process.exit(1);
+    }
+}
+main().catch(error => {
+    console.error('💥 Unhandled error in main:', error);
+    process.exit(1);
+});

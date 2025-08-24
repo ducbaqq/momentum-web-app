@@ -18,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/details" className="px-3 py-1 rounded-full border border-border bg-card hover:opacity-80">Details</a>
               <a href="/backtest" className="px-3 py-1 rounded-full border border-border bg-card hover:opacity-80">Backtest</a>
               <a href="/fake-trader" className="px-3 py-1 rounded-full border border-border bg-card hover:opacity-80">Fake Trader</a>
+              <a href="/real-trader" className="px-3 py-1 rounded-full border border-border bg-card hover:opacity-80 text-orange-400 border-orange-500/50">Real Trader</a>
             </nav>
           </header>
           {children}
