@@ -210,7 +210,7 @@ class FakeTrader {
     }
     
     // Update run's last update timestamp and check if winding down run should be stopped
-    if ((run.status as any) === 'winding_down') {
+    if (run.status === 'winding_down') {
       // Get current positions to check if all are closed
       const allPositions = await getCurrentPositions(run.run_id);
       const openPositionsCount = allPositions.filter(p => p.status === 'open').length;
@@ -318,7 +318,7 @@ class FakeTrader {
     // Execute entry signals (but skip if winding down)
     for (const signal of signals) {
       // If run is winding down, only allow exit signals
-      if ((run.status as any) === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
+      if (run.status === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
         console.log(`     🚫 Skipping entry signal for ${signal.symbol} - run is winding down`);
         
         // Log the skipped signal
@@ -359,78 +359,6 @@ class FakeTrader {
     }
   }
 
-  private async processSymbol(
-    run: FakeTradeRun, 
-    symbol: string, 
-    candle: Candle, 
-    strategy: Function
-  ) {
-    console.log(`\n  📊 Processing ${symbol} @ $${candle.close}`);
-    
-    // Get current positions for this symbol
-    const positions = await getCurrentPositions(run.run_id);
-    const symbolPositions = positions.filter(p => p.symbol === symbol);
-    
-    // Update existing positions with current prices
-    for (const position of symbolPositions) {
-      const unrealizedPnl = this.calculateUnrealizedPnL(position, candle.close);
-      const marketValue = position.size * candle.close;
-      await updatePosition(position.position_id, candle.close, unrealizedPnl, marketValue);
-      
-      console.log(`     📍 Updated position: ${position.side} ${position.size.toFixed(4)} @ $${position.entry_price} (P&L: $${unrealizedPnl.toFixed(2)})`);
-    }
-    
-    // Prepare strategy state
-    const strategyState = {
-      runId: run.run_id,
-      symbol: symbol,
-      currentCapital: run.current_capital,
-      positions: symbolPositions
-    };
-    
-    // Generate trading signals
-    const signals = strategy(candle, strategyState, run.params);
-    
-    // Execute signals (but skip entry signals if winding down)
-    for (const signal of signals) {
-      // If run is winding down, only allow exit signals
-      if ((run.status as any) === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
-        console.log(`     🚫 Skipping entry signal for ${signal.symbol} - run is winding down`);
-        
-        // Log the skipped signal
-        await logSignal({
-          run_id: run.run_id,
-          symbol: signal.symbol,
-          signal_type: 'entry',
-          side: signal.side,
-          size: signal.size,
-          price: signal.price,
-          candle_data: candle,
-          executed: false,
-          rejection_reason: 'winding_down_no_new_positions',
-          signal_ts: new Date().toISOString()
-        });
-        
-        continue; // Skip this signal
-      }
-      
-      await this.executeSignal(run, signal, candle);
-    }
-    
-    // Log signal for debugging (even if no signals)
-    if (signals.length === 0) {
-      await logSignal({
-        run_id: run.run_id,
-        symbol: symbol,
-        signal_type: 'entry',
-        candle_data: candle,
-        strategy_state: strategyState,
-        rejection_reason: 'no_signal_generated',
-        executed: false,
-        signal_ts: new Date().toISOString()
-      });
-    }
-  }
 
   private async executeEntrySignal(run: FakeTradeRun, signal: any, candle: Candle) {
     console.log(`     🎯 Entry Signal: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${candle.close} (${signal.reason})`);
@@ -455,7 +383,7 @@ class FakeTrader {
         status: 'open'
       });
       
-      const positionId = await createPosition({
+      await createPosition({
         run_id: run.run_id,
         symbol: signal.symbol,
         side: signal.side,
@@ -531,7 +459,7 @@ class FakeTrader {
           status: 'open'
         });
         
-        const positionId = await createPosition({
+        await createPosition({
           run_id: run.run_id,
           symbol: signal.symbol,
           side: signal.side,

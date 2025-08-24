@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import type { FakeTradeRun, FakeTradeResult, FakeTrade, FakePosition, FakeSignal, Candle } from './types.js';
+import type { FakeTradeRun, FakeTrade, FakePosition, FakeSignal, Candle } from './types.js';
 
 // Initialize database connection
 export const pool = new Pool({
@@ -32,7 +32,13 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
   `;
   
   const result = await pool.query(query);
-  return result.rows;
+  return result.rows.map(row => ({
+    ...row,
+    starting_capital: Number(row.starting_capital),
+    current_capital: Number(row.current_capital),
+    max_concurrent_positions: Number(row.max_concurrent_positions),
+    seed: row.seed ? Number(row.seed) : undefined,
+  }));
 }
 
 // Get live ticker prices (most recent 1m candle for position management)
@@ -288,7 +294,18 @@ export async function getCurrentPositions(runId: string): Promise<FakePosition[]
   `;
   
   const result = await pool.query(query, [runId]);
-  return result.rows;
+  return result.rows.map(row => ({
+    ...row,
+    size: Number(row.size),
+    entry_price: Number(row.entry_price),
+    current_price: row.current_price ? Number(row.current_price) : undefined,
+    unrealized_pnl: Number(row.unrealized_pnl),
+    cost_basis: Number(row.cost_basis),
+    market_value: row.market_value ? Number(row.market_value) : undefined,
+    stop_loss: row.stop_loss ? Number(row.stop_loss) : undefined,
+    take_profit: row.take_profit ? Number(row.take_profit) : undefined,
+    leverage: Number(row.leverage),
+  }));
 }
 
 // Create new trade

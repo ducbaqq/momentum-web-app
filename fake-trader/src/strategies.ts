@@ -65,7 +65,7 @@ export function momentumBreakoutStrategy(
     
     if (momentumOk && volumeOk && spreadOk) {
       // Calculate position size (20% of capital)
-      const riskAmount = startingCapital * 0.20;
+      const riskAmount = state.currentCapital * 0.20;
       const size = riskAmount / candle.close;
       
       signals.push({

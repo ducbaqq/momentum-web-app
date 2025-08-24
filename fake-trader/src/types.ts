@@ -7,7 +7,7 @@ export interface FakeTradeRun {
   strategy_version: string;
   params: any;
   seed?: number;
-  status: 'active' | 'paused' | 'stopped' | 'error';
+  status: 'active' | 'paused' | 'stopped' | 'error' | 'winding_down';
   
   starting_capital: number;
   current_capital: number;
