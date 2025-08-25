@@ -1,3 +1,102 @@
+export declare enum SymbolStatus {
+    TRADING = "TRADING",
+    END_OF_DAY = "END_OF_DAY",
+    HALT = "HALT",
+    BREAK = "BREAK"
+}
+export declare enum OrderStatus {
+    NEW = "NEW",
+    PENDING_NEW = "PENDING_NEW",
+    PARTIALLY_FILLED = "PARTIALLY_FILLED",
+    FILLED = "FILLED",
+    CANCELED = "CANCELED",
+    PENDING_CANCEL = "PENDING_CANCEL",
+    REJECTED = "REJECTED",
+    EXPIRED = "EXPIRED",
+    EXPIRED_IN_MATCH = "EXPIRED_IN_MATCH"
+}
+export declare enum OrderType {
+    LIMIT = "LIMIT",
+    MARKET = "MARKET",
+    STOP_LOSS = "STOP_LOSS",
+    STOP_LOSS_LIMIT = "STOP_LOSS_LIMIT",
+    TAKE_PROFIT = "TAKE_PROFIT",
+    TAKE_PROFIT_LIMIT = "TAKE_PROFIT_LIMIT",
+    LIMIT_MAKER = "LIMIT_MAKER"
+}
+export declare enum OrderSide {
+    BUY = "BUY",
+    SELL = "SELL"
+}
+export declare enum TimeInForce {
+    GTC = "GTC",// Good Till Canceled
+    IOC = "IOC",// Immediate Or Cancel  
+    FOK = "FOK"
+}
+export declare enum OrderResponseType {
+    ACK = "ACK",
+    RESULT = "RESULT",
+    FULL = "FULL"
+}
+export declare enum RateLimitType {
+    REQUEST_WEIGHT = "REQUEST_WEIGHT",
+    ORDERS = "ORDERS",
+    RAW_REQUESTS = "RAW_REQUESTS"
+}
+export declare enum RateLimitInterval {
+    SECOND = "SECOND",
+    MINUTE = "MINUTE",
+    DAY = "DAY"
+}
+export declare enum STPMode {
+    NONE = "NONE",
+    EXPIRE_MAKER = "EXPIRE_MAKER",
+    EXPIRE_TAKER = "EXPIRE_TAKER",
+    EXPIRE_BOTH = "EXPIRE_BOTH",
+    DECREMENT = "DECREMENT"
+}
+export interface BinanceError {
+    code: number;
+    msg: string;
+}
+export declare enum BinanceErrorCode {
+    UNKNOWN = -1000,
+    DISCONNECTED = -1001,
+    UNAUTHORIZED = -1002,
+    TOO_MANY_REQUESTS = -1003,
+    UNEXPECTED_RESP = -1006,
+    TIMEOUT = -1007,
+    SERVER_BUSY = -1008,
+    INVALID_MESSAGE = -1013,
+    UNKNOWN_ORDER_COMPOSITION = -1014,
+    TOO_MANY_ORDERS = -1015,
+    SERVICE_SHUTTING_DOWN = -1016,
+    UNSUPPORTED_OPERATION = -1020,
+    INVALID_TIMESTAMP = -1021,
+    INVALID_SIGNATURE = -1022,
+    ILLEGAL_CHARS = -1100,
+    TOO_MANY_PARAMETERS = -1101,
+    MANDATORY_PARAM_EMPTY_OR_MALFORMED = -1102,
+    UNKNOWN_PARAM = -1103,
+    UNREAD_PARAMETERS = -1104,
+    PARAM_EMPTY = -1105,
+    PARAM_NOT_REQUIRED = -1106,
+    BAD_PRECISION = -1111,
+    NO_DEPTH = -1112,
+    TIF_NOT_REQUIRED = -1114,
+    INVALID_TIF = -1115,
+    INVALID_ORDER_TYPE = -1116,
+    INVALID_SIDE = -1117,
+    EMPTY_NEW_CL_ORD_ID = -1118,
+    EMPTY_ORG_CL_ORD_ID = -1119,
+    BAD_INTERVAL = -1120,
+    BAD_SYMBOL = -1121,
+    NEW_ORDER_REJECTED = -2010,
+    CANCEL_REJECTED = -2011,
+    ORDER_DOES_NOT_EXIST = -2013,
+    BAD_API_KEY_FMT = -2014,
+    REJECTED_MBX_KEY = -2015
+}
 export interface RealTradeRun {
     run_id: string;
     name: string;
@@ -47,7 +146,7 @@ export interface RealTrade {
     trade_id: string;
     run_id: string;
     symbol: string;
-    side: 'LONG' | 'SHORT';
+    side: PositionSide;
     entry_ts: string;
     exit_ts?: string;
     qty: number;
@@ -67,7 +166,7 @@ export interface RealPosition {
     position_id: string;
     run_id: string;
     symbol: string;
-    side: 'LONG' | 'SHORT';
+    side: PositionSide;
     size: number;
     entry_price: number;
     current_price?: number;
@@ -77,7 +176,7 @@ export interface RealPosition {
     stop_loss?: number;
     take_profit?: number;
     leverage: number;
-    binance_position_side?: 'LONG' | 'SHORT';
+    binance_position_side?: PositionSide;
     binance_margin_type?: 'isolated' | 'cross';
     opened_at: string;
     last_update: string;
@@ -88,7 +187,7 @@ export interface RealSignal {
     run_id: string;
     symbol: string;
     signal_type: 'entry' | 'exit' | 'adjustment';
-    side?: 'LONG' | 'SHORT';
+    side?: PositionSide;
     size?: number;
     price?: number;
     candle_data?: any;
@@ -132,6 +231,22 @@ export interface BinanceConfig {
     apiKey: string;
     apiSecret: string;
     testnet: boolean;
+    wsConfig?: {
+        reconnect?: boolean;
+        reconnectInterval?: number;
+        maxReconnects?: number;
+        pingInterval?: number;
+    };
+    errorConfig?: {
+        maxRetries?: number;
+        retryDelay?: number;
+        enableCircuitBreaker?: boolean;
+    };
+}
+export declare enum PositionSide {
+    LONG = "LONG",
+    SHORT = "SHORT",
+    BOTH = "BOTH"
 }
 export interface BinanceOrderResponse {
     symbol: string;
@@ -142,10 +257,10 @@ export interface BinanceOrderResponse {
     origQty: string;
     executedQty: string;
     cummulativeQuoteQty: string;
-    status: string;
-    timeInForce: string;
-    type: string;
-    side: string;
+    status: OrderStatus;
+    timeInForce: TimeInForce;
+    type: OrderType;
+    side: OrderSide;
     fills: Array<{
         price: string;
         qty: string;
@@ -199,4 +314,40 @@ export interface BinanceAccountInfo {
         availableBalance: string;
     }>;
     positions: BinancePosition[];
+}
+export interface WebSocketStreamConfig {
+    baseUrl: string;
+    streams: string[];
+    reconnect: boolean;
+    reconnectInterval: number;
+    maxReconnects: number;
+}
+export interface MarketStreamData {
+    stream: string;
+    data: any;
+}
+export interface UserDataStreamData {
+    e: string;
+    E: number;
+    [key: string]: any;
+}
+export interface WebSocketManager {
+    connect(): Promise<void>;
+    disconnect(): void;
+    subscribe(streams: string[]): void;
+    unsubscribe(streams: string[]): void;
+    onMessage(callback: (data: any) => void): void;
+    onError(callback: (error: Error) => void): void;
+    onClose(callback: () => void): void;
+}
+export interface ErrorHandler {
+    handleBinanceError(error: BinanceError): ErrorHandlingResult;
+    shouldRetry(error: BinanceError): boolean;
+    getRetryDelay(error: BinanceError, attempt: number): number;
+}
+export interface ErrorHandlingResult {
+    shouldRetry: boolean;
+    retryDelay: number;
+    logLevel: 'info' | 'warn' | 'error';
+    message: string;
 }

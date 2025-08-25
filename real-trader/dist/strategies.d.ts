@@ -1,9 +1,10 @@
 import type { Candle, RealPosition } from './types.js';
+import { PositionSide, OrderType } from './types.js';
 export interface TradeSignal {
     symbol: string;
-    side: 'LONG' | 'SHORT';
+    side: PositionSide;
     size: number;
-    type: 'MARKET' | 'LIMIT';
+    type: OrderType;
     price?: number;
     stopLoss?: number;
     takeProfit?: number;

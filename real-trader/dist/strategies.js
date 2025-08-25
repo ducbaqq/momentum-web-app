@@ -1,3 +1,4 @@
+import { PositionSide, OrderType } from './types.js';
 // Momentum Breakout Strategy (Basic)
 export function momentumBreakoutStrategy(candle, state, params) {
     const signals = [];
@@ -15,9 +16,9 @@ export function momentumBreakoutStrategy(candle, state, params) {
         if (momentumLost || rsiOverbought) {
             signals.push({
                 symbol: state.symbol,
-                side: existingPosition.side === 'LONG' ? 'SHORT' : 'LONG',
-                size: existingPosition.size,
-                type: 'MARKET',
+                side: existingPosition.side === PositionSide.LONG ? PositionSide.SHORT : PositionSide.LONG,
+                size: Math.abs(existingPosition.size),
+                type: OrderType.MARKET,
                 reason: momentumLost ? 'momentum_loss' : 'rsi_overbought',
                 leverage
             });
@@ -37,9 +38,9 @@ export function momentumBreakoutStrategy(candle, state, params) {
             const size = riskAmount / candle.close;
             signals.push({
                 symbol: state.symbol,
-                side: 'LONG',
+                side: PositionSide.LONG,
                 size: size,
-                type: 'MARKET',
+                type: OrderType.MARKET,
                 stopLoss: candle.close * 0.98,
                 takeProfit: candle.close * 1.03,
                 leverage,
@@ -71,9 +72,9 @@ export function momentumBreakoutV2Strategy(candle, state, params) {
         if (momentumLost || rsiOverbought) {
             signals.push({
                 symbol: state.symbol,
-                side: existingPosition.side === 'LONG' ? 'SHORT' : 'LONG',
-                size: existingPosition.size,
-                type: 'MARKET',
+                side: existingPosition.side === PositionSide.LONG ? PositionSide.SHORT : PositionSide.LONG,
+                size: Math.abs(existingPosition.size),
+                type: OrderType.MARKET,
                 reason: momentumLost ? 'momentum_loss' : 'rsi_overbought',
                 leverage
             });
@@ -92,9 +93,9 @@ export function momentumBreakoutV2Strategy(candle, state, params) {
             const positionSize = positionNotional / candle.close;
             signals.push({
                 symbol: state.symbol,
-                side: 'LONG',
+                side: PositionSide.LONG,
                 size: positionSize,
-                type: 'MARKET',
+                type: OrderType.MARKET,
                 leverage,
                 reason: 'momentum_breakout_v2'
             });
@@ -129,9 +130,9 @@ export function regimeFilteredMomentumStrategy(candle, state, params) {
         if (!inRegime) {
             signals.push({
                 symbol: state.symbol,
-                side: existingPosition.side === 'LONG' ? 'SHORT' : 'LONG',
-                size: existingPosition.size,
-                type: 'MARKET',
+                side: existingPosition.side === PositionSide.LONG ? PositionSide.SHORT : PositionSide.LONG,
+                size: Math.abs(existingPosition.size),
+                type: OrderType.MARKET,
                 reason: 'regime_exit',
                 leverage
             });
@@ -150,9 +151,9 @@ export function regimeFilteredMomentumStrategy(candle, state, params) {
             const size = riskAmount / candle.close;
             signals.push({
                 symbol: state.symbol,
-                side: 'LONG',
+                side: PositionSide.LONG,
                 size: size,
-                type: 'MARKET',
+                type: OrderType.MARKET,
                 stopLoss: candle.close * 0.98,
                 takeProfit: candle.close * 1.03,
                 leverage,

@@ -3,11 +3,16 @@ import cron from 'node-cron';
 import { BinanceClient } from './binanceClient.js';
 import { testConnection, getActiveRuns, getCompleted15mCandles, hasNew15mCandles, getLastProcessedCandle, updateLastProcessedCandle, getCurrentPositions, createTrade, createPosition, updatePosition, closePosition, logSignal, updateRunStatus, updateRunCapital, getTodaysPnL, getMaxDrawdown } from './db.js';
 import { getStrategy } from './strategies.js';
-// Load environment variables
-dotenv.config();
+import { PositionSide, OrderSide } from './types.js';
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
+dotenv.config(); // Also load from current directory if exists
 class RealTrader {
     running = false;
     binanceClient;
+    websocketInitialized = false;
+    priceCache = new Map();
+    lastPriceUpdate = 0;
     constructor(binanceConfig) {
         this.binanceClient = new BinanceClient(binanceConfig);
     }
@@ -22,6 +27,8 @@ class RealTrader {
         }
         // Verify account info
         await this.verifyAccountSetup();
+        // Initialize WebSocket streams
+        await this.initializeWebSocketStreams();
         // Check for downtime recovery
         await this.handleDowntimeRecovery();
         // Schedule trading execution every 1 minute
@@ -257,9 +264,18 @@ class RealTrader {
         if (positions.length === 0) {
             return;
         }
-        console.log(`   📍 Updating ${positions.length} open positions with live prices`);
+        console.log(`   📍 Updating ${positions.length} open positions with ${this.websocketInitialized ? 'WebSocket' : 'REST'} prices`);
         for (const position of positions) {
-            const livePrice = livePrices[position.symbol];
+            let livePrice = livePrices[position.symbol];
+            // Try to get price from WebSocket cache first (more recent)
+            if (this.websocketInitialized && this.priceCache.has(position.symbol)) {
+                const cachedPrice = this.priceCache.get(position.symbol);
+                const cacheAge = Date.now() - this.lastPriceUpdate;
+                // Use cached price if it's recent (less than 30 seconds old)
+                if (cacheAge < 30000) {
+                    livePrice = cachedPrice;
+                }
+            }
             if (!livePrice) {
                 console.log(`   ⚠️  No live price for ${position.symbol}, keeping current price`);
                 continue;
@@ -278,15 +294,15 @@ class RealTrader {
         let exitReason = '';
         // Check stop loss
         if (position.stop_loss &&
-            ((position.side === 'LONG' && currentPrice <= position.stop_loss) ||
-                (position.side === 'SHORT' && currentPrice >= position.stop_loss))) {
+            ((position.side === PositionSide.LONG && currentPrice <= position.stop_loss) ||
+                (position.side === PositionSide.SHORT && currentPrice >= position.stop_loss))) {
             shouldExit = true;
             exitReason = 'stop_loss_trigger';
         }
         // Check take profit
         if (position.take_profit &&
-            ((position.side === 'LONG' && currentPrice >= position.take_profit) ||
-                (position.side === 'SHORT' && currentPrice <= position.take_profit))) {
+            ((position.side === PositionSide.LONG && currentPrice >= position.take_profit) ||
+                (position.side === PositionSide.SHORT && currentPrice <= position.take_profit))) {
             shouldExit = true;
             exitReason = 'take_profit_trigger';
         }
@@ -294,7 +310,7 @@ class RealTrader {
             console.log(`   🎯 Exit triggered for ${position.symbol}: ${exitReason} at $${currentPrice.toFixed(2)}`);
             try {
                 // Place exit order on Binance
-                const exitSide = position.side === 'LONG' ? 'SELL' : 'BUY';
+                const exitSide = position.side === PositionSide.LONG ? OrderSide.SELL : OrderSide.BUY;
                 const orderResponse = await this.binanceClient.placeFuturesMarketOrder(position.symbol, exitSide, Math.abs(position.size), {
                     positionSide: position.binance_position_side || position.side
                 });
@@ -372,7 +388,7 @@ class RealTrader {
                 continue; // Skip this signal
             }
             // Only process entry signals here (exit signals handled in position management)
-            if (signal.side === 'LONG' || signal.side === 'SHORT') {
+            if (signal.side === PositionSide.LONG || signal.side === PositionSide.SHORT) {
                 await this.executeEntrySignal(run, signal, candle);
             }
         }
@@ -401,8 +417,9 @@ class RealTrader {
                 signal.size = adjustedSize;
             }
             // Get minimum order size and format quantity
-            const { minQty, stepSize } = await this.binanceClient.getMinOrderSize(signal.symbol);
-            const formattedSize = this.binanceClient.formatQuantity(signal.symbol, signal.size, stepSize);
+            const { minQty } = await this.binanceClient.getMinOrderSize(signal.symbol);
+            const formattedSizeStr = this.binanceClient.formatQuantity(signal.symbol, signal.size);
+            const formattedSize = parseFloat(formattedSizeStr);
             if (formattedSize < minQty) {
                 console.log(`     📏 Position size too small: ${formattedSize} < ${minQty}, skipping`);
                 await logSignal({
@@ -414,13 +431,13 @@ class RealTrader {
                     price: signal.price,
                     candle_data: candle,
                     executed: false,
-                    execution_notes: `Position size below minimum: ${formattedSize} < ${minQty}`,
+                    execution_notes: `Position size below minimum: ${formattedSize.toString()} < ${minQty.toString()}`,
                     signal_ts: new Date().toISOString()
                 });
                 return;
             }
             // Place order on Binance
-            const orderSide = signal.side === 'LONG' ? 'BUY' : 'SELL';
+            const orderSide = signal.side === PositionSide.LONG ? OrderSide.BUY : OrderSide.SELL;
             const orderResponse = await this.binanceClient.placeFuturesMarketOrder(signal.symbol, orderSide, formattedSize, {
                 leverage: signal.leverage || 1,
                 marginType: 'cross',
@@ -499,7 +516,7 @@ class RealTrader {
         }
     }
     calculateUnrealizedPnL(position, currentPrice) {
-        if (position.side === 'LONG') {
+        if (position.side === PositionSide.LONG) {
             return (currentPrice - position.entry_price) * Math.abs(position.size);
         }
         else {
@@ -507,27 +524,167 @@ class RealTrader {
         }
     }
     calculateRealizedPnL(position, exitPrice) {
-        if (position.side === 'LONG') {
+        if (position.side === PositionSide.LONG) {
             return (exitPrice - position.entry_price) * Math.abs(position.size);
         }
         else {
             return (position.entry_price - exitPrice) * Math.abs(position.size);
         }
     }
+    // WebSocket stream initialization and management
+    async initializeWebSocketStreams() {
+        try {
+            console.log('🌐 Initializing WebSocket streams...');
+            // Get active runs to determine which symbols to stream
+            const activeRuns = await getActiveRuns();
+            const allSymbols = Array.from(new Set(activeRuns.flatMap(run => run.symbols)));
+            if (allSymbols.length === 0) {
+                console.log('📭 No active runs found, skipping WebSocket initialization');
+                return;
+            }
+            // Initialize market data streams for live prices
+            await this.binanceClient.initializeMarketStreams(allSymbols, ['ticker', 'kline_1m']);
+            // Initialize user data stream for account updates
+            await this.binanceClient.initializeUserDataStream();
+            // Set up event handlers
+            this.setupWebSocketEventHandlers();
+            this.websocketInitialized = true;
+            console.log(`✅ WebSocket streams initialized for ${allSymbols.length} symbols`);
+        }
+        catch (error) {
+            console.error('❌ Failed to initialize WebSocket streams:', error);
+            // Don't throw error - continue with REST API fallback
+        }
+    }
+    setupWebSocketEventHandlers() {
+        const marketStreamManager = this.binanceClient.getMarketStreamManager();
+        const userStreamManager = this.binanceClient.getUserStreamManager();
+        if (marketStreamManager) {
+            // Handle market data updates
+            marketStreamManager.onMessage((data) => {
+                this.handleMarketDataUpdate(data);
+            });
+            marketStreamManager.onError((error) => {
+                console.error('📡 Market stream error:', error.message);
+            });
+            marketStreamManager.onClose(() => {
+                console.warn('📡 Market stream disconnected');
+                this.websocketInitialized = false;
+            });
+        }
+        if (userStreamManager) {
+            // Handle user data updates (orders, positions, account)
+            userStreamManager.onMessage((data) => {
+                this.handleUserDataUpdate(data);
+            });
+            userStreamManager.onError((error) => {
+                console.error('👤 User stream error:', error.message);
+            });
+            userStreamManager.onClose(() => {
+                console.warn('👤 User stream disconnected');
+            });
+        }
+    }
+    handleMarketDataUpdate(data) {
+        try {
+            if (data.stream.includes('@ticker')) {
+                // Handle 24hr ticker updates
+                const ticker = data.data;
+                if (ticker.c) { // Current price
+                    const symbol = ticker.s;
+                    const price = parseFloat(ticker.c);
+                    this.priceCache.set(symbol, price);
+                    this.lastPriceUpdate = Date.now();
+                }
+            }
+            else if (data.stream.includes('@kline')) {
+                // Handle kline/candlestick updates
+                const kline = data.data;
+                if (kline.k && kline.k.x) { // Closed kline
+                    const symbol = kline.k.s;
+                    const closePrice = parseFloat(kline.k.c);
+                    this.priceCache.set(symbol, closePrice);
+                    this.lastPriceUpdate = Date.now();
+                }
+            }
+        }
+        catch (error) {
+            console.error('❌ Error handling market data update:', error);
+        }
+    }
+    handleUserDataUpdate(data) {
+        try {
+            switch (data.e) {
+                case 'ACCOUNT_UPDATE':
+                    console.log('💰 Account balance updated via WebSocket');
+                    break;
+                case 'ORDER_TRADE_UPDATE':
+                    console.log(`📋 Order update: ${data.o?.s} ${data.o?.S} ${data.o?.X}`);
+                    break;
+                case 'executionReport':
+                    console.log(`⚡ Execution report: ${data.s} ${data.S} ${data.X}`);
+                    break;
+                case 'listenKeyExpired':
+                    console.warn('🔑 Listen key expired, reinitializing user data stream');
+                    this.reinitializeUserDataStream();
+                    break;
+                default:
+                    // Handle other user data events
+                    break;
+            }
+        }
+        catch (error) {
+            console.error('❌ Error handling user data update:', error);
+        }
+    }
+    async reinitializeUserDataStream() {
+        try {
+            await this.binanceClient.initializeUserDataStream();
+            console.log('✅ User data stream reinitialized');
+        }
+        catch (error) {
+            console.error('❌ Failed to reinitialize user data stream:', error);
+        }
+    }
+    // Cleanup method
+    async shutdown() {
+        console.log('🔄 Shutting down Real Trader...');
+        // Disconnect WebSocket streams
+        if (this.websocketInitialized) {
+            await this.binanceClient.disconnect();
+        }
+        console.log('👋 Real Trader shutdown complete');
+    }
 }
 // Main execution
 async function main() {
+    // Determine if running on testnet (default to true for safety)
+    const isTestnet = process.env.BINANCE_TESTNET !== 'false';
+    // Choose appropriate API credentials
+    const apiKey = isTestnet
+        ? process.env.BINANCE_TESTNET_API_KEY
+        : process.env.BINANCE_API_KEY;
+    const apiSecret = isTestnet
+        ? process.env.BINANCE_TESTNET_API_SECRET
+        : process.env.BINANCE_API_SECRET;
     // Validate required environment variables
-    const requiredEnvVars = ['DATABASE_URL', 'BINANCE_API_KEY', 'BINANCE_API_SECRET'];
+    const requiredEnvVars = ['DATABASE_URL'];
     const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+    // Check for API credentials based on mode
+    if (!apiKey) {
+        missingEnvVars.push(isTestnet ? 'BINANCE_TESTNET_API_KEY' : 'BINANCE_API_KEY');
+    }
+    if (!apiSecret) {
+        missingEnvVars.push(isTestnet ? 'BINANCE_TESTNET_API_SECRET' : 'BINANCE_API_SECRET');
+    }
     if (missingEnvVars.length > 0) {
         console.error(`❌ Missing required environment variables: ${missingEnvVars.join(', ')}`);
         process.exit(1);
     }
     const binanceConfig = {
-        apiKey: process.env.BINANCE_API_KEY,
-        apiSecret: process.env.BINANCE_API_SECRET,
-        testnet: process.env.BINANCE_TESTNET === 'true' || true, // Default to testnet for safety
+        apiKey: apiKey,
+        apiSecret: apiSecret,
+        testnet: isTestnet,
     };
     const trader = new RealTrader(binanceConfig);
     try {
