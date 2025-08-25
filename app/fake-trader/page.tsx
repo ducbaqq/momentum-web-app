@@ -35,7 +35,7 @@ export default function FakeTraderPage() {
   const [formData, setFormData] = useState({
     name: '',
     selectedSymbols: [] as string[],
-    strategy: 'momentum_breakout',
+    strategy: 'momentum_breakout_v2',
     timeframe: '15m',
     
     // Capital settings

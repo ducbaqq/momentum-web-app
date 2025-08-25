@@ -58,7 +58,7 @@ export default function BacktestPage() {
     startDate: '',
     endDate: '',
     selectedSymbols: [] as string[],
-    strategy: 'momentum_breakout',
+    strategy: 'momentum_breakout_v2',
     timeframe: '1m',
     
     // Capital settings

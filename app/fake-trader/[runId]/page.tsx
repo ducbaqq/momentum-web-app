@@ -83,10 +83,25 @@ export default function FakeTraderDetailsPage() {
         const runData = await runRes.json();
         setRun(runData.run);
         
-        // TODO: Fetch positions and trades when API endpoints are available
-        // For now, set empty arrays
-        setPositions([]);
-        setTrades([]);
+        // Fetch positions
+        const positionsRes = await fetch(`/api/fake-trader/runs/${runId}/positions`, { cache: 'no-store' });
+        if (positionsRes.ok) {
+          const positionsData = await positionsRes.json();
+          setPositions(positionsData.positions || []);
+        } else {
+          console.error('Failed to fetch positions:', positionsRes.status);
+          setPositions([]);
+        }
+        
+        // Fetch trades
+        const tradesRes = await fetch(`/api/fake-trader/runs/${runId}/trades`, { cache: 'no-store' });
+        if (tradesRes.ok) {
+          const tradesData = await tradesRes.json();
+          setTrades(tradesData.trades || []);
+        } else {
+          console.error('Failed to fetch trades:', tradesRes.status);
+          setTrades([]);
+        }
         
         // Set page title
         if (runData.run?.name) {
@@ -114,10 +129,25 @@ export default function FakeTraderDetailsPage() {
 
     const interval = setInterval(async () => {
       try {
+        // Refresh run details
         const runRes = await fetch(`/api/fake-trader/runs/${runId}`, { cache: 'no-store' });
         if (runRes.ok) {
           const runData = await runRes.json();
           setRun(runData.run);
+        }
+        
+        // Refresh positions
+        const positionsRes = await fetch(`/api/fake-trader/runs/${runId}/positions`, { cache: 'no-store' });
+        if (positionsRes.ok) {
+          const positionsData = await positionsRes.json();
+          setPositions(positionsData.positions || []);
+        }
+        
+        // Refresh trades
+        const tradesRes = await fetch(`/api/fake-trader/runs/${runId}/trades`, { cache: 'no-store' });
+        if (tradesRes.ok) {
+          const tradesData = await tradesRes.json();
+          setTrades(tradesData.trades || []);
         }
       } catch (e) {
         console.error('Failed to refresh fake trader data:', e);
