@@ -54,9 +54,9 @@ export default function RealTraderPage() {
     // Environment
     testnet: true, // Always default to testnet for safety
     
-    // Basic Strategy parameters (momentum_breakout, momentum_breakout_v2)
-    minRoc5m: 1.5, // Slightly more conservative
-    minVolMult: 3.5,
+    // Basic Strategy parameters (momentum_breakout_v2)
+    minRoc5m: 0.5,
+    minVolMult: 2,
     maxSpreadBps: 8,
     
     // Risk Management
@@ -75,7 +75,7 @@ export default function RealTraderPage() {
     // Execution parameters
     feeBps: 4,
     slippageBps: 3,
-    leverage: 1, // No leverage for safety
+    leverage: 20,
   });
 
   async function fetchSymbols() {
@@ -150,7 +150,7 @@ export default function RealTraderPage() {
     }
 
     // Validate basic strategy parameters
-    if (formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') {
+    if (formData.strategy === 'momentum_breakout_v2') {
       if (formData.minRoc5m <= 0) {
         errors.minRoc5m = 'Min ROC 5m must be greater than 0';
       }
@@ -168,17 +168,11 @@ export default function RealTraderPage() {
     if (formData.leverage < 1) {
       errors.leverage = 'Leverage must be at least 1';
     }
-    if (formData.leverage > 3) {
-      errors.leverage = 'Leverage should not exceed 3x for real trading safety';
-    }
 
     // Safety check for mainnet
     if (!formData.testnet) {
       if (formData.startingCapital > 10000) {
         errors.startingCapital = 'For mainnet trading, starting capital is limited to $10,000 for safety';
-      }
-      if (formData.leverage > 2) {
-        errors.leverage = 'For mainnet trading, leverage is limited to 2x for safety';
       }
     }
 
@@ -221,7 +215,7 @@ export default function RealTraderPage() {
         leverage: formData.leverage
       };
 
-      if (formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') {
+      if (formData.strategy === 'momentum_breakout_v2') {
         strategyParams = {
           ...strategyParams,
           minRoc5m: formData.minRoc5m,
@@ -673,14 +667,13 @@ export default function RealTraderPage() {
                 value={formData.strategy}
                 onChange={(e) => setFormData(prev => ({ ...prev, strategy: e.target.value }))}
               >
-                <option value="momentum_breakout">Momentum Breakout (Basic)</option>
                 <option value="momentum_breakout_v2">Momentum Breakout V2 (Professional)</option>
                 <option value="regime_filtered_momentum">Regime Filtered Momentum (Advanced)</option>
               </select>
             </div>
 
             {/* Strategy Parameters - Simplified for real trading */}
-            {(formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') && (
+            {formData.strategy === 'momentum_breakout_v2' && (
               <div className="border-t border-border pt-4">
                 <h4 className="font-medium mb-3">Strategy Parameters</h4>
                 <div className="grid grid-cols-3 gap-3">
@@ -773,7 +766,7 @@ export default function RealTraderPage() {
                     type="number"
                     step="1"
                     min="1"
-                    max={formData.testnet ? "5" : "3"}
+                    max="20"
                     className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
                       validationErrors.leverage ? 'border-red-500' : 'border-border'
                     }`}
@@ -789,7 +782,7 @@ export default function RealTraderPage() {
                     <p className="text-red-500 text-xs mt-1">{validationErrors.leverage}</p>
                   )}
                   <p className="text-xs text-sub mt-1">
-                    Max: {formData.testnet ? '5x (testnet)' : '3x (mainnet)'}
+                    Max: 20x
                   </p>
                 </div>
               </div>

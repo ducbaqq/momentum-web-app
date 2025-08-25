@@ -39,13 +39,13 @@ export default function FakeTraderPage() {
     timeframe: '15m',
     
     // Capital settings
-    startingCapital: 10000,
+    startingCapital: 1000,
     maxConcurrentPositions: 3,
     
-    // Basic Strategy parameters (momentum_breakout, momentum_breakout_v2)
-    minRoc5m: 1.2,
-    minVolMult: 3,
-    maxSpreadBps: 10,
+    // Basic Strategy parameters (momentum_breakout_v2)
+    minRoc5m: 0.5,
+    minVolMult: 2,
+    maxSpreadBps: 8,
     
     // Regime Filter (regime_filtered_momentum)
     emaLength: 200,
@@ -72,7 +72,7 @@ export default function FakeTraderPage() {
     // Execution parameters
     feeBps: 4,
     slippageBps: 2,
-    leverage: 1,
+    leverage: 20,
   });
 
   async function fetchSymbols() {
@@ -131,7 +131,7 @@ export default function FakeTraderPage() {
     }
 
     // Validate basic strategy parameters
-    if (formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') {
+    if (formData.strategy === 'momentum_breakout_v2') {
       if (formData.minRoc5m <= 0) {
         errors.minRoc5m = 'Min ROC 5m must be greater than 0';
       }
@@ -220,7 +220,7 @@ export default function FakeTraderPage() {
         leverage: formData.leverage
       };
 
-      if (formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') {
+      if (formData.strategy === 'momentum_breakout_v2') {
         strategyParams = {
           ...strategyParams,
           minRoc5m: formData.minRoc5m,
@@ -526,7 +526,6 @@ export default function FakeTraderPage() {
                 value={formData.strategy}
                 onChange={(e) => setFormData(prev => ({ ...prev, strategy: e.target.value }))}
               >
-                <option value="momentum_breakout">Momentum Breakout (Basic)</option>
                 <option value="momentum_breakout_v2">Momentum Breakout V2 (Professional)</option>
                 <option value="regime_filtered_momentum">Regime Filtered Momentum (Advanced)</option>
               </select>
@@ -555,7 +554,7 @@ export default function FakeTraderPage() {
               <h4 className="font-medium mb-3">Strategy Parameters</h4>
               
               {/* Basic Momentum Strategy Parameters */}
-              {(formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') && (
+              {formData.strategy === 'momentum_breakout_v2' && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>

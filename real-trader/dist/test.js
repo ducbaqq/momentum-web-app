@@ -7,8 +7,25 @@ async function runTests() {
     console.log('🧪 Running Real Trader Tests...\n');
     // Check environment variables
     console.log('1. ✅ Checking Environment Variables...');
-    const requiredEnvVars = ['DATABASE_URL', 'BINANCE_API_KEY', 'BINANCE_API_SECRET'];
+    // Determine if running on testnet (default to true for safety)
+    const isTestnet = process.env.BINANCE_TESTNET !== 'false';
+    console.log(`Running in ${isTestnet ? 'TESTNET' : 'MAINNET'} mode`);
+    // Choose appropriate API credentials
+    const apiKey = isTestnet
+        ? process.env.BINANCE_TESTNET_API_KEY
+        : process.env.BINANCE_API_KEY;
+    const apiSecret = isTestnet
+        ? process.env.BINANCE_TESTNET_API_SECRET
+        : process.env.BINANCE_API_SECRET;
+    const requiredEnvVars = ['DATABASE_URL'];
     const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+    // Check for API credentials based on mode
+    if (!apiKey) {
+        missingEnvVars.push(isTestnet ? 'BINANCE_TESTNET_API_KEY' : 'BINANCE_API_KEY');
+    }
+    if (!apiSecret) {
+        missingEnvVars.push(isTestnet ? 'BINANCE_TESTNET_API_SECRET' : 'BINANCE_API_SECRET');
+    }
     if (missingEnvVars.length > 0) {
         console.log(`❌ Missing environment variables: ${missingEnvVars.join(', ')}`);
         return false;
@@ -27,9 +44,9 @@ async function runTests() {
     // Test Binance connection
     console.log('3. ✅ Testing Binance API Connection...');
     const binanceConfig = {
-        apiKey: process.env.BINANCE_API_KEY,
-        apiSecret: process.env.BINANCE_API_SECRET,
-        testnet: process.env.BINANCE_TESTNET === 'true' || true,
+        apiKey: apiKey,
+        apiSecret: apiSecret,
+        testnet: isTestnet,
     };
     const binanceClient = new BinanceClient(binanceConfig);
     try {

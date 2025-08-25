@@ -62,12 +62,12 @@ export default function BacktestPage() {
     timeframe: '1m',
     
     // Capital settings
-    startingCapital: 10000,
+    startingCapital: 1000,
     
-    // Basic Strategy parameters (momentum_breakout, momentum_breakout_v2)
-    minRoc5m: 1.2,
-    minVolMult: 3,
-    maxSpreadBps: 10,
+    // Basic Strategy parameters (momentum_breakout_v2)
+    minRoc5m: 0.5,
+    minVolMult: 2,
+    maxSpreadBps: 8,
     
     // Regime Filter (regime_filtered_momentum)
     emaLength: 200,
@@ -97,7 +97,7 @@ export default function BacktestPage() {
     // Execution parameters
     feeBps: 4,
     slippageBps: 2,
-    leverage: 1,
+    leverage: 20,
   });
 
   async function fetchSymbols() {
@@ -646,7 +646,6 @@ export default function BacktestPage() {
                 value={formData.strategy}
                 onChange={(e) => setFormData(prev => ({ ...prev, strategy: e.target.value }))}
               >
-                <option value="momentum_breakout">Momentum Breakout (Basic)</option>
                 <option value="momentum_breakout_v2">Momentum Breakout V2 (Professional)</option>
                 <option value="regime_filtered_momentum">Regime Filtered Momentum (Advanced)</option>
               </select>
@@ -681,7 +680,7 @@ export default function BacktestPage() {
               <h4 className="font-medium mb-3">Strategy Parameters</h4>
               
               {/* Basic Momentum Strategy Parameters */}
-              {(formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') && (
+              {formData.strategy === 'momentum_breakout_v2' && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
