@@ -280,15 +280,17 @@ class FakeTrader {
       
       const realizedPnl = this.calculateRealizedPnL(position, currentPrice);
       const fees = position.size * currentPrice * 0.0004; // 0.04% fees
+      const positionValue = position.size * currentPrice; // Value received from closing position
       
       await closePosition(position.position_id, currentPrice, realizedPnl);
       
-      // Update run capital
-      const newCapital = run.current_capital + realizedPnl - fees;
+      // Update run capital - add back position value and subtract fees
+      // Note: realizedPnl is already the difference, so we add position cost basis + realizedPnl - fees
+      const newCapital = run.current_capital + positionValue - fees;
       await updateRunCapital(run.run_id, newCapital);
       run.current_capital = newCapital; // Update local copy
       
-      console.log(`   ✅ Closed ${position.symbol} position: P&L $${realizedPnl.toFixed(2)} (fees: $${fees.toFixed(2)})`);
+      console.log(`   ✅ Closed ${position.symbol} position: P&L $${realizedPnl.toFixed(2)} (fees: $${fees.toFixed(2)}) (Capital: $${run.current_capital.toFixed(2)})`);
     }
   }
 
@@ -366,6 +368,12 @@ class FakeTrader {
     try {
       const executionPrice = candle.close; // Execute at 15m candle close price
       const fees = signal.size * executionPrice * 0.0004; // 0.04% fees
+      const positionCost = signal.size * executionPrice; // Cost of opening the position
+      
+      // Update run capital - reduce by position cost + fees when opening position
+      const newCapital = run.current_capital - positionCost - fees;
+      await updateRunCapital(run.run_id, newCapital);
+      run.current_capital = newCapital; // Update local copy
       
       // Create new trade and position
       const tradeId = await createTrade({
@@ -399,7 +407,7 @@ class FakeTrader {
         status: 'open'
       });
       
-      console.log(`     ✅ Opened ${signal.side} position: ${tradeId.substring(0, 8)}...`);
+      console.log(`     ✅ Opened ${signal.side} position: ${tradeId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
       
       // Log successful signal execution
       await logSignal({
@@ -444,6 +452,13 @@ class FakeTrader {
       
       if (signal.side === 'LONG' || signal.side === 'SHORT') {
         // Entry signal - create new trade and position
+        const positionCost = signal.size * executionPrice; // Cost of opening the position
+        
+        // Update run capital - reduce by position cost + fees when opening position
+        const newCapital = run.current_capital - positionCost - fees;
+        await updateRunCapital(run.run_id, newCapital);
+        run.current_capital = newCapital; // Update local copy
+        
         const tradeId = await createTrade({
           run_id: run.run_id,
           symbol: signal.symbol,
@@ -475,7 +490,7 @@ class FakeTrader {
           status: 'open'
         });
         
-        console.log(`     ✅ Opened ${signal.side} position: ${tradeId.substring(0, 8)}...`);
+        console.log(`     ✅ Opened ${signal.side} position: ${tradeId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
         
       } else {
         // Exit signal - close existing position
@@ -484,14 +499,17 @@ class FakeTrader {
         
         if (position) {
           const realizedPnl = this.calculateRealizedPnL(position, executionPrice);
+          const positionValue = position.size * executionPrice; // Value received from closing position
           await closePosition(position.position_id, executionPrice, realizedPnl);
           
           console.log(`     ✅ Closed position: P&L $${realizedPnl.toFixed(2)}`);
           
-          // Update run capital
-          const newCapital = run.current_capital + realizedPnl - fees;
+          // Update run capital - add back position value and subtract fees
+          const newCapital = run.current_capital + positionValue - fees;
           await updateRunCapital(run.run_id, newCapital);
           run.current_capital = newCapital; // Update local copy
+          
+          console.log(`     💰 Capital updated: $${run.current_capital.toFixed(2)}`);
         }
       }
       
