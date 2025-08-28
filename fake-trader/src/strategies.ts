@@ -141,6 +141,8 @@ export function momentumBreakoutV2Strategy(
         side: 'LONG',
         size: positionSize,
         type: 'MARKET',
+        stopLoss: candle.close * 0.98, // 2% stop loss
+        takeProfit: candle.close * 1.03, // 3% take profit
         leverage,
         reason: 'momentum_breakout_v2'
       });

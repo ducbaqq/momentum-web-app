@@ -64,7 +64,7 @@ export async function getLivePrices(symbols: string[]): Promise<Record<string, n
 }
 
 // Get completed 15m candle data for entry signals (using 1m data aggregated to 15m intervals)
-export async function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle>> {
+export async function getCompleted15mCandles(symbols: string[], lastProcessedTime?: string): Promise<Record<string, Candle>> {
   const query = `
     WITH raw_1m_data AS (
       SELECT 
@@ -99,13 +99,13 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
       SELECT  
         symbol,
         candle_start as ts,
-        open, high, low, close, volume,
-        ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY candle_start DESC) as rn
+        open, high, low, close, volume
       FROM aggregated_15m_candles
-      ORDER BY symbol, candle_start DESC
+      WHERE ($2::timestamp IS NULL OR candle_start > $2::timestamp)
+      ORDER BY symbol, candle_start ASC
     ),
     current_candle AS (
-      SELECT * FROM latest_15m_candles WHERE rn = 1
+      SELECT DISTINCT ON (symbol) * FROM latest_15m_candles ORDER BY symbol, ts ASC
     ),
     latest_1m_features AS (
       SELECT DISTINCT ON (symbol)
@@ -130,7 +130,7 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
     LEFT JOIN latest_1m_features f ON f.symbol = c.symbol AND ABS(EXTRACT(EPOCH FROM (f.ts - c.ts))) < 900  -- Within 15 minutes
   `;
   
-  const result = await pool.query(query, [symbols]);
+  const result = await pool.query(query, [symbols, lastProcessedTime || null]);
   
   const candles: Record<string, Candle> = {};
   for (const row of result.rows) {

@@ -16,7 +16,8 @@ import {
   closePosition,
   logSignal,
   updateRunStatus,
-  updateRunCapital
+  updateRunCapital,
+  pool
 } from './db.js';
 import { getStrategy } from './strategies.js';
 import type { FakeTradeRun, Candle, FakePosition } from './types.js';
@@ -167,6 +168,28 @@ class FakeTrader {
     console.log(`   Symbols: ${run.symbols.join(', ')}`);
     console.log(`   Capital: $${run.current_capital}`);
     
+    // Bankruptcy protection - stop runs with negative capital
+    if (run.current_capital < 0) {
+      console.log(`   💸 BANKRUPTCY: Capital is negative ($${run.current_capital.toFixed(2)}) - stopping run`);
+      await updateRunStatus(run.run_id, 'stopped', `Bankruptcy protection: Capital went negative ($${run.current_capital.toFixed(2)})`);
+      return;
+    }
+    
+    // Safety check - if run has way too many positions, stop it immediately
+    const currentPositions = await getCurrentPositions(run.run_id);
+    if (currentPositions.length > run.max_concurrent_positions * 2) {
+      console.log(`   🚨 SAFETY: Too many positions (${currentPositions.length} vs limit ${run.max_concurrent_positions}) - stopping run and closing positions`);
+      
+      // Stop the run
+      await updateRunStatus(run.run_id, 'stopped', `Safety stop: Too many open positions (${currentPositions.length} vs limit ${run.max_concurrent_positions})`);
+      
+      // Force close all positions  
+      await pool.query(`UPDATE ft_positions SET status = 'closed' WHERE run_id = $1 AND status = 'open'`, [run.run_id]);
+      console.log(`   🔄 Force closed ${currentPositions.length} positions`);
+      
+      return;
+    }
+    
     // Get live prices for position management (always needed)
     const livePrices = await getLivePrices(run.symbols);
     
@@ -181,7 +204,7 @@ class FakeTrader {
       console.log(`   📊 New 15m candle(s) available - evaluating entry signals`);
       
       // Get completed 15m candles for entry signal evaluation
-      const completed15mCandles = await getCompleted15mCandles(run.symbols);
+      const completed15mCandles = await getCompleted15mCandles(run.symbols, lastProcessedCandle || undefined);
       
       // Check if we have data for all symbols
       const missingData = run.symbols.filter(symbol => !completed15mCandles[symbol]);
@@ -191,6 +214,8 @@ class FakeTrader {
       
       // Get strategy function
       const strategy = getStrategy(run.strategy_name);
+      
+      let latestProcessedTimestamp: string | null = null;
       
       // Process each symbol for entry signals
       for (const symbol of run.symbols) {
@@ -202,8 +227,15 @@ class FakeTrader {
         
         await this.processSymbolEntrySignals(run, symbol, candle, strategy);
         
-        // Update last processed candle timestamp
-        await updateLastProcessedCandle(run.run_id, candle.ts);
+        // Track the latest timestamp across all symbols
+        if (!latestProcessedTimestamp || new Date(candle.ts) > new Date(latestProcessedTimestamp)) {
+          latestProcessedTimestamp = candle.ts;
+        }
+      }
+      
+      // Update last processed candle timestamp with the latest across all symbols
+      if (latestProcessedTimestamp) {
+        await updateLastProcessedCandle(run.run_id, latestProcessedTimestamp);
       }
     } else {
       console.log(`   ⏸️  No new 15m candles - only updating positions with live prices`);
@@ -236,28 +268,51 @@ class FakeTrader {
     
     console.log(`   📍 Updating ${positions.length} open positions with live prices`);
     
+    // If there are too many positions, it indicates a problem - don't spam logs
+    const verboseLogging = positions.length <= 10;
+    let updatedCount = 0;
+    let exitedCount = 0;
+    
     for (const position of positions) {
       const livePrice = livePrices[position.symbol];
       if (!livePrice) {
-        console.log(`   ⚠️  No live price for ${position.symbol}, keeping current price`);
+        if (verboseLogging) {
+          console.log(`   ⚠️  No live price for ${position.symbol}, keeping current price`);
+        }
         continue;
       }
       
       const unrealizedPnl = this.calculateUnrealizedPnL(position, livePrice);
       const marketValue = position.size * livePrice;
       await updatePosition(position.position_id, livePrice, unrealizedPnl, marketValue);
+      updatedCount++;
       
-      const prevPrice = position.current_price ?? position.entry_price;
-      console.log(`   📊 Updated ${position.symbol}: $${prevPrice?.toFixed(2) ?? 'N/A'} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
+      if (verboseLogging) {
+        const prevPrice = position.current_price ?? position.entry_price;
+        console.log(`   📊 Updated ${position.symbol}: $${prevPrice?.toFixed(2) ?? 'N/A'} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
+      }
       
       // Check for stop loss / take profit triggers using live prices
+      const positionsBefore = positions.length;
       await this.checkExitConditions(run, position, livePrice);
+      // Note: We can't accurately count exits here since checkExitConditions doesn't return status
+    }
+    
+    if (!verboseLogging) {
+      console.log(`   ✅ Updated ${updatedCount} positions (logging reduced due to high position count)`);
     }
   }
 
   private async checkExitConditions(run: FakeTradeRun, position: FakePosition, currentPrice: number) {
     let shouldExit = false;
     let exitReason = '';
+    
+    // Check time-based exit (close positions older than 24 hours)
+    const hoursOpen = (new Date().getTime() - new Date(position.opened_at).getTime()) / (1000 * 60 * 60);
+    if (hoursOpen > 24) {
+      shouldExit = true;
+      exitReason = 'time_based_exit';
+    }
     
     // Check stop loss
     if (position.stop_loss && 
@@ -366,9 +421,52 @@ class FakeTrader {
     console.log(`     🎯 Entry Signal: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${candle.close} (${signal.reason})`);
     
     try {
+      // Check position limits BEFORE executing
+      const currentPositions = await getCurrentPositions(run.run_id);
+      if (currentPositions.length >= run.max_concurrent_positions) {
+        console.log(`     🚫 Position limit reached: ${currentPositions.length}/${run.max_concurrent_positions} - skipping signal`);
+        
+        // Log the rejected signal
+        await logSignal({
+          run_id: run.run_id,
+          symbol: signal.symbol,
+          signal_type: 'entry',
+          side: signal.side,
+          size: signal.size,
+          price: signal.price,
+          candle_data: candle,
+          executed: false,
+          rejection_reason: `position_limit_reached_${currentPositions.length}_of_${run.max_concurrent_positions}`,
+          signal_ts: new Date().toISOString()
+        });
+        
+        return; // Exit early - don't execute the signal
+      }
+      
+      // Use 15-minute candle close price for execution (consistent with backtest)
       const executionPrice = candle.close; // Execute at 15m candle close price
       const fees = signal.size * executionPrice * 0.0004; // 0.04% fees
       const positionCost = signal.size * executionPrice; // Cost of opening the position
+      
+      if (run.current_capital < (positionCost + fees)) {
+        console.log(`     💸 Insufficient capital: need $${(positionCost + fees).toFixed(2)}, have $${run.current_capital.toFixed(2)} - skipping signal`);
+        
+        // Log the rejected signal
+        await logSignal({
+          run_id: run.run_id,
+          symbol: signal.symbol,
+          signal_type: 'entry',
+          side: signal.side,
+          size: signal.size,
+          price: signal.price,
+          candle_data: candle,
+          executed: false,
+          rejection_reason: `insufficient_capital_need_${(positionCost + fees).toFixed(2)}_have_${run.current_capital.toFixed(2)}`,
+          signal_ts: new Date().toISOString()
+        });
+        
+        return; // Exit early - don't execute the signal
+      }
       
       // Update run capital - reduce by position cost + fees when opening position
       const newCapital = run.current_capital - positionCost - fees;
@@ -451,8 +549,19 @@ class FakeTrader {
       const fees = signal.size * executionPrice * 0.0004; // 0.04% fees
       
       if (signal.side === 'LONG' || signal.side === 'SHORT') {
-        // Entry signal - create new trade and position
+        // Entry signal - check limits first
+        const currentPositions = await getCurrentPositions(run.run_id);
+        if (currentPositions.length >= run.max_concurrent_positions) {
+          console.log(`     🚫 Position limit reached: ${currentPositions.length}/${run.max_concurrent_positions} - skipping signal`);
+          return; // Exit early
+        }
+        
         const positionCost = signal.size * executionPrice; // Cost of opening the position
+        
+        if (run.current_capital < (positionCost + fees)) {
+          console.log(`     💸 Insufficient capital: need $${(positionCost + fees).toFixed(2)}, have $${run.current_capital.toFixed(2)} - skipping signal`);
+          return; // Exit early
+        }
         
         // Update run capital - reduce by position cost + fees when opening position
         const newCapital = run.current_capital - positionCost - fees;
