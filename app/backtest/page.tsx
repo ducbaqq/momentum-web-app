@@ -18,6 +18,9 @@ type BacktestRun = {
   status: string;
   created_at: string;
   error: string | null;
+  starting_capital: number | string;
+  total_pnl: number | string;
+  ending_capital: number | string;
 };
 
 type BacktestResult = {
@@ -51,6 +54,10 @@ export default function BacktestPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{runId: string, name: string} | null>(null);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -135,6 +142,66 @@ export default function BacktestPage() {
       console.error('Failed to fetch results:', e);
       setResults([]);
       setNotification({type: 'error', message: 'Failed to fetch backtest results'});
+    }
+  }
+
+  async function deleteBacktest(runId: string) {
+    setDeletingRunId(runId);
+    try {
+      const res = await fetch(`/api/backtest/runs?run_id=${runId}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      setNotification({type: 'success', message: result.message});
+      
+      // Remove the deleted run from the list
+      setRuns(prevRuns => prevRuns.filter(run => run.run_id !== runId));
+      
+      // Clear selection if the deleted run was selected
+      if (selectedRunId === runId) {
+        setSelectedRunId(null);
+        setResults([]);
+      }
+      
+    } catch (e: any) {
+      setNotification({type: 'error', message: `Failed to delete backtest: ${e.message}`});
+    } finally {
+      setDeletingRunId(null);
+      setShowDeleteConfirm(null);
+    }
+  }
+
+  async function deleteAllBacktests() {
+    setDeletingAll(true);
+    try {
+      const res = await fetch('/api/backtest/runs?all=true', {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      setNotification({type: 'success', message: result.message});
+      
+      // Clear all runs from the list
+      setRuns([]);
+      setSelectedRunId(null);
+      setResults([]);
+      
+    } catch (e: any) {
+      setNotification({type: 'error', message: `Failed to delete all backtests: ${e.message}`});
+    } finally {
+      setDeletingAll(false);
+      setShowDeleteAllConfirm(false);
     }
   }
 
@@ -466,6 +533,20 @@ export default function BacktestPage() {
     }
   }, [notification]);
 
+  // Handle keyboard events for delete confirmation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (showDeleteConfirm && e.key === 'Escape') {
+        setShowDeleteConfirm(null);
+      }
+    };
+
+    if (showDeleteConfirm) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [showDeleteConfirm]);
+
   return (
     <main className="space-y-6">
       <h2 className="text-2xl font-bold">Backtest</h2>
@@ -484,6 +565,84 @@ export default function BacktestPage() {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onKeyDown={(e) => e.key === 'Escape' && setShowDeleteConfirm(null)}
+          tabIndex={-1}
+        >
+          <div className="bg-card border border-border rounded-lg p-6 max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">Delete Backtest</h3>
+            <p className="text-sm text-sub mb-6">
+              Are you sure you want to delete "<span className="font-medium text-white">{showDeleteConfirm.name || 'Unnamed'}</span>"? 
+              <br />
+              <span className="text-red-400">This will permanently remove all associated data including trades, results, and equity history.</span>
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(null)}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-bg transition-colors"
+                disabled={deletingRunId !== null}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteBacktest(showDeleteConfirm.runId)}
+                disabled={deletingRunId !== null}
+                className={clsx(
+                  'px-4 py-2 text-sm rounded font-medium transition-colors',
+                  deletingRunId === showDeleteConfirm.runId 
+                    ? 'bg-red-600/50 cursor-not-allowed' 
+                    : 'bg-red-600 hover:bg-red-700'
+                )}
+              >
+                {deletingRunId === showDeleteConfirm.runId ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Confirmation Dialog */}
+      {showDeleteAllConfirm && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onKeyDown={(e) => e.key === 'Escape' && setShowDeleteAllConfirm(false)}
+          tabIndex={-1}
+        >
+          <div className="bg-card border border-border rounded-lg p-6 max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">Delete All Backtests</h3>
+            <p className="text-sm text-sub mb-6">
+              Are you sure you want to delete <span className="font-medium text-white">all {runs.length} backtest runs</span>? 
+              <br />
+              <span className="text-red-400">This will permanently remove all backtest data including trades, results, and equity history for every run.</span>
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteAllConfirm(false)}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-bg transition-colors"
+                disabled={deletingAll}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deleteAllBacktests}
+                disabled={deletingAll}
+                className={clsx(
+                  'px-4 py-2 text-sm rounded font-medium transition-colors',
+                  deletingAll 
+                    ? 'bg-red-600/50 cursor-not-allowed' 
+                    : 'bg-red-600 hover:bg-red-700'
+                )}
+              >
+                {deletingAll ? 'Deleting All...' : 'Delete All'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1179,7 +1338,19 @@ export default function BacktestPage() {
 
         {/* Backtest Runs */}
         <div className="rounded-xl border border-border bg-card p-4 flex flex-col h-full">
-          <h3 className="text-lg font-semibold mb-4">Recent Runs</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Recent Runs</h3>
+            {runs.length > 0 && (
+              <button
+                onClick={() => setShowDeleteAllConfirm(true)}
+                disabled={deletingAll}
+                className="px-3 py-1 text-sm bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded transition-colors"
+                title="Delete all backtest runs"
+              >
+                {deletingAll ? 'Deleting...' : 'Delete All'}
+              </button>
+            )}
+          </div>
           
           <div className="space-y-2 flex-1 overflow-y-auto">
             {runs.map(run => (
@@ -1210,15 +1381,61 @@ export default function BacktestPage() {
                       {run.symbols.length} symbols • {run.strategy_name} • 
                       {formatCompactLocalDateTime(run.start_ts)} - {formatCompactLocalDateTime(run.end_ts)}
                     </div>
+                    {(() => {
+                      // Safely convert values to numbers and check validity
+                      const startingCapital = typeof run.starting_capital === 'number' ? run.starting_capital : parseFloat(run.starting_capital) || 0;
+                      const endingCapital = typeof run.ending_capital === 'number' ? run.ending_capital : parseFloat(run.ending_capital) || 0;
+                      const totalPnl = typeof run.total_pnl === 'number' ? run.total_pnl : parseFloat(run.total_pnl) || 0;
+                      
+                      // Only show if we have valid capital data and the run is done
+                      if (run.status === 'done' && !isNaN(startingCapital) && !isNaN(endingCapital) && startingCapital > 0) {
+                        return (
+                          <div className="text-xs mt-1">
+                            <span className="text-sub">Capital:</span>
+                            <span className="font-medium"> ${startingCapital.toFixed(0)}</span>
+                            <span className="text-sub"> → </span>
+                            <span className={clsx(
+                              'font-medium',
+                              endingCapital >= startingCapital ? 'text-good' : 'text-bad'
+                            )}>
+                              ${endingCapital.toFixed(0)}
+                            </span>
+                            <span className={clsx(
+                              'text-xs ml-1',
+                              totalPnl >= 0 ? 'text-good' : 'text-bad'
+                            )}>
+                              ({totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(0)})
+                            </span>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
-                  <div className={clsx(
-                    'px-2 py-1 rounded text-xs font-medium',
-                    run.status === 'done' && 'bg-green-500/20 text-green-400',
-                    run.status === 'running' && 'bg-blue-500/20 text-blue-400',
-                    run.status === 'queued' && 'bg-yellow-500/20 text-yellow-400',
-                    run.status === 'error' && 'bg-red-500/20 text-red-400'
-                  )}>
-                    {run.status}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowDeleteConfirm({
+                          runId: run.run_id,
+                          name: run.name || 'Unnamed'
+                        });
+                      }}
+                      className="p-1 hover:bg-red-600/20 rounded transition-colors text-red-400 hover:text-red-300"
+                      disabled={deletingRunId === run.run_id}
+                      title="Delete backtest"
+                    >
+                      {deletingRunId === run.run_id ? '⏳' : '🗑️'}
+                    </button>
+                    <div className={clsx(
+                      'px-2 py-1 rounded text-xs font-medium',
+                      run.status === 'done' && 'bg-green-500/20 text-green-400',
+                      run.status === 'running' && 'bg-blue-500/20 text-blue-400',
+                      run.status === 'queued' && 'bg-yellow-500/20 text-yellow-400',
+                      run.status === 'error' && 'bg-red-500/20 text-red-400'
+                    )}>
+                      {run.status}
+                    </div>
                   </div>
                 </div>
                 {selectedRunId === run.run_id && (
@@ -1281,7 +1498,20 @@ export default function BacktestPage() {
                         </div>
                       )}
                       
-                      <div className="flex justify-end mt-4 pt-3 border-t border-border/50">
+                      <div className="flex justify-between items-center mt-4 pt-3 border-t border-border/50">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowDeleteConfirm({
+                              runId: run.run_id,
+                              name: run.name || 'Unnamed'
+                            });
+                          }}
+                          className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 border border-red-600/40 hover:border-red-600/60 rounded text-xs font-medium transition-colors text-red-400"
+                          disabled={deletingRunId === run.run_id}
+                        >
+                          {deletingRunId === run.run_id ? '🗑️ Deleting...' : '🗑️ Delete'}
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
