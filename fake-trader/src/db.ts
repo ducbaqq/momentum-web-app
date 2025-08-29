@@ -63,11 +63,53 @@ export async function getLivePrices(symbols: string[]): Promise<Record<string, n
   return prices;
 }
 
+// Helper function to get the most recent completed 15-minute period
+function getMostRecentCompleted15mPeriod(): Date {
+  const now = new Date();
+  const currentMinutes = now.getUTCMinutes();
+  
+  // Calculate minutes into the current 15-minute period
+  const minutesInto15mPeriod = currentMinutes % 15;
+  
+  // Always go back to the most recent COMPLETED period
+  // If we're less than 2 minutes into current period, go back 2 periods (to be safe for data lag)
+  // Otherwise go back 1 period (the one that just completed)
+  let targetMinutes: number;
+  if (minutesInto15mPeriod < 2) {
+    // Go back to previous completed period (2 periods back)
+    targetMinutes = currentMinutes - minutesInto15mPeriod - 30;
+  } else {
+    // Go back to the period that just completed (1 period back)
+    targetMinutes = currentMinutes - minutesInto15mPeriod - 15;
+  }
+  
+  // Handle negative minutes (wrap to previous hour)
+  if (targetMinutes < 0) {
+    targetMinutes += 60;
+    const targetPeriodStart = new Date(now);
+    targetPeriodStart.setUTCHours(targetPeriodStart.getUTCHours() - 1);
+    targetPeriodStart.setUTCMinutes(targetMinutes, 0, 0);
+    return targetPeriodStart;
+  }
+  
+  // Calculate the start of the target 15-minute period
+  const targetPeriodStart = new Date(now);
+  targetPeriodStart.setUTCMinutes(targetMinutes, 0, 0);
+  
+  return targetPeriodStart;
+}
+
 // Get completed 15m candle data for entry signals (using 1m data aggregated to 15m intervals)
-export async function getCompleted15mCandles(symbols: string[], lastProcessedTime?: string): Promise<Record<string, Candle>> {
+export async function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle>> {
+  // Calculate the target 15-minute period to fetch
+  const targetPeriod = getMostRecentCompleted15mPeriod();
+  const periodEnd = new Date(targetPeriod.getTime() + 15 * 60 * 1000); // Add 15 minutes
+  
+  console.log(`🔍 [FAKE TRADER] Fetching 15m candle for period: ${targetPeriod.toISOString()} to ${periodEnd.toISOString()}`);
+  
   // Enhanced version - aggregate from 1m candles and calculate basic indicators
   const query = `
-    WITH raw_1m_data AS (
+    WITH historical_1m_data AS (
       SELECT 
         symbol,
         ts,
@@ -81,8 +123,8 @@ export async function getCompleted15mCandles(symbols: string[], lastProcessedTim
         ROW_NUMBER() OVER (PARTITION BY symbol, to_timestamp(floor(extract(epoch from ts) / (15*60)) * (15*60)) ORDER BY ts DESC) as rn_desc
       FROM ohlcv_1m 
       WHERE symbol = ANY($1)
-      AND ts <= NOW() - INTERVAL '15 minutes'  -- Only completed 15m periods
-      AND ts >= NOW() - INTERVAL '6 hours'     -- Look back 6 hours for more data
+      AND ts >= $2::timestamp - INTERVAL '3 hours'  -- Get 3 hours of history for indicators
+      AND ts < $3::timestamp   -- Up to end of target period
     ),
     aggregated_15m_candles AS (
       SELECT 
@@ -93,7 +135,7 @@ export async function getCompleted15mCandles(symbols: string[], lastProcessedTim
         MIN(low) as low,
         MAX(CASE WHEN rn_desc = 1 THEN close END) as close,
         SUM(volume) as volume
-      FROM raw_1m_data
+      FROM historical_1m_data
       GROUP BY symbol, candle_start
       HAVING COUNT(*) >= 10  -- Ensure we have most of the 15m period data
     ),
@@ -125,7 +167,7 @@ export async function getCompleted15mCandles(symbols: string[], lastProcessedTim
         END as vol_mult,
         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) as rn
       FROM historical_candles
-      WHERE ($2::timestamp IS NULL OR ts > $2::timestamp)
+      WHERE ts = $2::timestamp  -- Only return the specific target period
     )
     SELECT 
       symbol, ts, open, high, low, close, volume, roc_5m, vol_mult, vol_avg_20
@@ -135,7 +177,12 @@ export async function getCompleted15mCandles(symbols: string[], lastProcessedTim
     ORDER BY symbol, ts DESC
   `;
   
-  const result = await pool.query(query, [symbols, lastProcessedTime || null]);
+  const result = await pool.query(query, [symbols, targetPeriod.toISOString(), periodEnd.toISOString()]);
+  
+  console.log(`🔍 [FAKE TRADER] Query returned ${result.rows.length} rows`);
+  if (result.rows.length > 0) {
+    console.log(`🔍 [FAKE TRADER] Sample row:`, JSON.stringify(result.rows[0], null, 2));
+  }
   
   const candles: Record<string, Candle> = {};
   for (const row of result.rows) {

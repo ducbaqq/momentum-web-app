@@ -5,9 +5,6 @@ import {
   testConnection, 
   getActiveRuns, 
   getCompleted15mCandles,
-  hasNew15mCandles,
-  getLastProcessedCandle,
-  updateLastProcessedCandle,
   getCurrentPositions,
   createTrade,
   createPosition,
@@ -275,49 +272,30 @@ class RealTrader {
     // Update existing positions with current prices
     await this.updateExistingPositions(run, livePrices);
     
-    // Check if new 15m candles are available for entry signal evaluation
-    const lastProcessedCandle = await getLastProcessedCandle(run.run_id);
-    const hasNewCandles = await hasNew15mCandles(run.symbols, lastProcessedCandle || undefined);
+    // Get the most recent completed 15m candles for entry signal evaluation
+    console.log(`   📊 Evaluating entry signals for most recent completed 15m period`);
     
-    if (hasNewCandles) {
-      console.log(`   📊 New 15m candle(s) available - evaluating entry signals`);
-      
-      // Get completed 15m candles for entry signal evaluation
-      const completed15mCandles = await getCompleted15mCandles(run.symbols, lastProcessedCandle || undefined);
-      
-      // Check if we have data for all symbols
-      const missingData = run.symbols.filter(symbol => !completed15mCandles[symbol]);
-      if (missingData.length > 0) {
-        console.log(`⚠️  Missing 15m candle data for symbols: ${missingData.join(', ')}`);
+    // Get completed 15m candles for entry signal evaluation
+    const completed15mCandles = await getCompleted15mCandles(run.symbols);
+    
+    // Check if we have data for all symbols
+    const missingData = run.symbols.filter(symbol => !completed15mCandles[symbol]);
+    if (missingData.length > 0) {
+      console.log(`⚠️  Missing 15m candle data for symbols: ${missingData.join(', ')}`);
+    }
+    
+    // Get strategy function
+    const strategy = getStrategy(run.strategy_name);
+    
+    // Process each symbol for entry signals
+    for (const symbol of run.symbols) {
+      const candle = completed15mCandles[symbol];
+      if (!candle) {
+        console.log(`⏭️  Skipping ${symbol} - no 15m candle data`);
+        continue;
       }
       
-      // Get strategy function
-      const strategy = getStrategy(run.strategy_name);
-      
-      let latestProcessedTimestamp: string | null = null;
-      
-      // Process each symbol for entry signals
-      for (const symbol of run.symbols) {
-        const candle = completed15mCandles[symbol];
-        if (!candle) {
-          console.log(`⏭️  Skipping ${symbol} - no 15m candle data`);
-          continue;
-        }
-        
-        await this.processSymbolEntrySignals(run, symbol, candle, strategy);
-        
-        // Track the latest timestamp across all symbols
-        if (!latestProcessedTimestamp || new Date(candle.ts) > new Date(latestProcessedTimestamp)) {
-          latestProcessedTimestamp = candle.ts;
-        }
-      }
-      
-      // Update last processed candle timestamp with the latest across all symbols
-      if (latestProcessedTimestamp) {
-        await updateLastProcessedCandle(run.run_id, latestProcessedTimestamp);
-      }
-    } else {
-      console.log(`   ⏸️  No new 15m candles - only updating positions with live prices`);
+      await this.processSymbolEntrySignals(run, symbol, candle, strategy);
     }
     
     // Update run's last update timestamp and check if winding down run should be stopped
