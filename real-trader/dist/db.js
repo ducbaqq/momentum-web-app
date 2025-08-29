@@ -119,7 +119,7 @@ export async function getCompleted15mCandles(symbols, lastProcessedTime) {
         END as vol_mult,
         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) as rn
       FROM historical_candles
-      -- WHERE ($2::timestamp IS NULL OR ts > $2::timestamp)  -- TEMPORARILY DISABLED FOR DEBUGGING
+      WHERE ($2::timestamp IS NULL OR ts > $2::timestamp)
     )
     SELECT 
       symbol, ts, open, high, low, close, volume, roc_5m, vol_mult, vol_avg_20
@@ -128,9 +128,7 @@ export async function getCompleted15mCandles(symbols, lastProcessedTime) {
       AND rn = 1  -- Only get the most recent candle per symbol
     ORDER BY symbol, ts DESC
   `;
-    console.log(`🔍 Querying 15m candles for symbols: ${symbols.join(', ')}, lastProcessedTime: ${lastProcessedTime || 'null'}`);
-    console.log(`🔍 Query (simplified for debugging):`);
-    const result = await pool.query(query, [symbols]);
+    const result = await pool.query(query, [symbols, lastProcessedTime || null]);
     console.log(`🔍 Query returned ${result.rows.length} rows`);
     if (result.rows.length > 0) {
         console.log(`🔍 Sample row:`, JSON.stringify(result.rows[0], null, 2));
