@@ -30,6 +30,10 @@ export default function FakeTraderPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{runId: string, name: string} | null>(null);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -342,6 +346,64 @@ export default function FakeTraderPage() {
     const pnl = currentCapital - startingCapital;
     const pnlPercent = ((pnl / startingCapital) * 100);
     return { pnl, pnlPercent };
+  }
+
+  async function deleteFakeTraderRun(runId: string) {
+    setDeletingRunId(runId);
+    try {
+      const res = await fetch(`/api/fake-trader/runs?run_id=${runId}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      setNotification({type: 'success', message: result.message});
+      
+      // Remove the deleted run from the list
+      setRuns(prevRuns => prevRuns.filter(run => run.run_id !== runId));
+      
+      // Clear selection if the deleted run was selected
+      if (selectedRunId === runId) {
+        setSelectedRunId(null);
+      }
+      
+    } catch (e: any) {
+      setNotification({type: 'error', message: `Failed to delete fake trader run: ${e.message}`});
+    } finally {
+      setDeletingRunId(null);
+      setShowDeleteConfirm(null);
+    }
+  }
+
+  async function deleteAllFakeTraderRuns() {
+    setDeletingAll(true);
+    try {
+      const res = await fetch('/api/fake-trader/runs?all=true', {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      setNotification({type: 'success', message: result.message});
+      
+      // Clear all runs from the list
+      setRuns([]);
+      setSelectedRunId(null);
+      
+    } catch (e: any) {
+      setNotification({type: 'error', message: `Failed to delete all fake trader runs: ${e.message}`});
+    } finally {
+      setDeletingAll(false);
+      setShowDeleteAllConfirm(false);
+    }
   }
 
   useEffect(() => {
@@ -837,9 +899,21 @@ export default function FakeTraderPage() {
 
           {/* Recent Runs */}
           <div>
-            <h4 className="text-sm font-medium text-gray-400 mb-2">
-              ⏸ Recent Runs ({inactiveRuns.length})
-            </h4>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-medium text-gray-400">
+                ⏸ Recent Runs ({inactiveRuns.length})
+              </h4>
+              {runs.length > 0 && (
+                <button
+                  onClick={() => setShowDeleteAllConfirm(true)}
+                  disabled={deletingAll}
+                  className="px-2 py-1 text-xs bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded transition-colors"
+                  title="Delete all fake trader runs"
+                >
+                  {deletingAll ? 'Deleting...' : 'Delete All'}
+                </button>
+              )}
+            </div>
             {inactiveRuns.length > 0 ? (
               <div className="space-y-2 flex-1 overflow-y-auto">
                 {inactiveRuns.map(run => {
@@ -936,7 +1010,7 @@ export default function FakeTraderPage() {
                             </div>
                           )}
                           
-                          <div className="flex justify-end mt-4 pt-3 border-t border-border/50">
+                          <div className="flex justify-end gap-3 mt-4 pt-3 border-t border-border/50">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -945,6 +1019,16 @@ export default function FakeTraderPage() {
                               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium transition-colors"
                             >
                               View Details
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowDeleteConfirm({runId: run.run_id, name: run.name || 'Unnamed'});
+                              }}
+                              disabled={deletingRunId !== null}
+                              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 rounded text-sm font-medium transition-colors"
+                            >
+                              {deletingRunId === run.run_id ? 'Deleting...' : 'Delete'}
                             </button>
                           </div>
                         </div>
@@ -962,6 +1046,84 @@ export default function FakeTraderPage() {
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onKeyDown={(e) => e.key === 'Escape' && setShowDeleteConfirm(null)}
+          tabIndex={-1}
+        >
+          <div className="bg-card border border-border rounded-lg p-6 max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">Delete Fake Trader Run</h3>
+            <p className="text-sm text-sub mb-6">
+              Are you sure you want to delete "<span className="font-medium text-white">{showDeleteConfirm.name}</span>"? 
+              <br />
+              <span className="text-red-400">This will permanently remove all associated data including trades, positions, and results.</span>
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(null)}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-bg transition-colors"
+                disabled={deletingRunId !== null}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteFakeTraderRun(showDeleteConfirm.runId)}
+                disabled={deletingRunId !== null}
+                className={clsx(
+                  'px-4 py-2 text-sm rounded font-medium transition-colors',
+                  deletingRunId === showDeleteConfirm.runId 
+                    ? 'bg-red-600/50 cursor-not-allowed' 
+                    : 'bg-red-600 hover:bg-red-700'
+                )}
+              >
+                {deletingRunId === showDeleteConfirm.runId ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Confirmation Dialog */}
+      {showDeleteAllConfirm && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onKeyDown={(e) => e.key === 'Escape' && setShowDeleteAllConfirm(false)}
+          tabIndex={-1}
+        >
+          <div className="bg-card border border-border rounded-lg p-6 max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">Delete All Fake Trader Runs</h3>
+            <p className="text-sm text-sub mb-6">
+              Are you sure you want to delete <span className="font-medium text-white">all {runs.length} fake trader runs</span>? 
+              <br />
+              <span className="text-red-400">This will permanently remove all fake trader data including trades, positions, and results for every run.</span>
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteAllConfirm(false)}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-bg transition-colors"
+                disabled={deletingAll}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deleteAllFakeTraderRuns}
+                disabled={deletingAll}
+                className={clsx(
+                  'px-4 py-2 text-sm rounded font-medium transition-colors',
+                  deletingAll 
+                    ? 'bg-red-600/50 cursor-not-allowed' 
+                    : 'bg-red-600 hover:bg-red-700'
+                )}
+              >
+                {deletingAll ? 'Deleting All...' : 'Delete All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
