@@ -5,6 +5,7 @@ import {
   testConnection, 
   getActiveRuns, 
   getCompleted15mCandles,
+  getLivePrices,
   getCurrentPositions,
   createTrade,
   createPosition,
@@ -163,7 +164,8 @@ class RealTrader {
         if (dbPos && !binancePos) {
           // Position exists in DB but not in Binance - mark as closed
           console.log(`   📍 Closing stale DB position for ${symbol}`);
-          const currentPrice = await this.binanceClient.getCurrentPrice(symbol);
+          const prices = await getLivePrices([symbol]);
+          const currentPrice = prices[symbol];
           const realizedPnl = this.calculateRealizedPnL(dbPos, currentPrice);
           await closePosition(dbPos.position_id, currentPrice, realizedPnl);
         } else if (!dbPos && binancePos && parseFloat(binancePos.positionAmt) !== 0) {
@@ -266,8 +268,8 @@ class RealTrader {
       return;
     }
     
-    // Get live prices from Binance for position management
-    const livePrices = await this.binanceClient.getCurrentPrices(run.symbols);
+    // Get live prices from database for position management
+    const livePrices = await getLivePrices(run.symbols);
     
     // Update existing positions with current prices
     await this.updateExistingPositions(run, livePrices);
