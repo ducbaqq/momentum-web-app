@@ -41,24 +41,24 @@ export default function RealTraderPage() {
     selectedSymbols: [] as string[],
     strategy: 'momentum_breakout_v2',
     timeframe: '15m',
-    
+
     // Capital settings
     startingCapital: 1000, // Lower default for real trading
     maxConcurrentPositions: 2, // More conservative
     maxPositionSizeUsd: 200, // Conservative position size
-    
+
     // Risk management
     dailyLossLimitPct: 3.0, // Conservative daily loss limit
     maxDrawdownPct: 8.0, // Conservative drawdown limit
-    
+
     // Environment
     testnet: true, // Always default to testnet for safety
-    
+
     // Basic Strategy parameters (momentum_breakout_v2)
     minRoc5m: 0.5,
     minVolMult: 2,
     maxSpreadBps: 8,
-    
+
     // Risk Management
     riskPerTrade: 0.25, // More conservative
     atrPeriod: 14,
@@ -66,12 +66,12 @@ export default function RealTraderPage() {
     partialTakeLevel: 1.5,
     partialTakePercent: 40,
     trailAfterPartial: true,
-    
+
     // Guards
     minBookImbalance: 1.3,
     avoidFundingMinute: true,
     killSwitchPercent: 1.5,
-    
+
     // Execution parameters
     feeBps: 4,
     slippageBps: 3,
@@ -98,7 +98,7 @@ export default function RealTraderPage() {
       }
       const data = await res.json();
       setRuns(data.runs || []);
-      
+
       // Debug log to see what we're getting
       console.log('Real trader runs fetched:', data.runs?.length || 0, 'runs');
     } catch (e: any) {
@@ -198,7 +198,7 @@ export default function RealTraderPage() {
         '• Have proper API keys configured\n' +
         '• Accept full responsibility for losses'
       );
-      
+
       if (!confirmed) {
         setNotification({type: 'warning', message: 'Real trading cancelled for safety'});
         return;
@@ -231,7 +231,7 @@ export default function RealTraderPage() {
           partialTakeLevel: formData.partialTakeLevel,
           partialTakePercent: formData.partialTakePercent / 100,
           trailAfterPartial: formData.trailAfterPartial,
-          
+
           // Guards
           minBookImbalance: formData.minBookImbalance,
           avoidFundingMinute: formData.avoidFundingMinute,
@@ -268,10 +268,10 @@ export default function RealTraderPage() {
       const result = await res.json();
       const modeText = result.testnet ? 'TESTNET' : 'MAINNET';
       setNotification({
-        type: 'success', 
+        type: 'success',
         message: `Real trader started successfully on ${modeText}! Run ID: ${result.run_id}`
       });
-      
+
       // Refresh the runs list
       try {
         await fetchRuns();
@@ -310,7 +310,7 @@ export default function RealTraderPage() {
 
       const result = await res.json();
       setNotification({type: 'success', message: result.message});
-      
+
       // Refresh runs list
       await fetchRuns();
     } catch (e: any) {
@@ -381,67 +381,78 @@ export default function RealTraderPage() {
   const inactiveRuns = runs.filter(run => run.status !== 'active');
 
   return (
-    <main className="space-y-6">
-      <div className="flex items-center gap-3">
-        <h2 className="text-2xl font-bold text-orange-400">Real Trader</h2>
-        <span className="px-3 py-1 text-sm bg-red-500/20 border border-red-500/50 rounded-full text-red-300">
-          ⚠️ REAL MONEY TRADING
-        </span>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center">
+            <span className="text-white text-xl">💰</span>
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-1">Real Trader</h1>
+            <p className="text-slate-400">Live trading with real money</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>
+            <span className="text-sm text-slate-300">Exchange Connected</span>
+          </div>
+          <span className="px-4 py-2 text-sm bg-danger/20 border border-danger/30 rounded-lg text-danger font-medium">
+            ⚠️ REAL MONEY
+          </span>
+        </div>
       </div>
 
       {/* Safety Warning */}
-      <div className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/30">
-        <h3 className="text-lg font-semibold text-orange-400 mb-2">⚠️ Important Safety Notice</h3>
-        <div className="text-sm text-orange-200 space-y-2">
-          <p><strong>This executes REAL trades with REAL money on Binance Futures.</strong></p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-            <div>
-              <p className="font-medium">✅ Before using Real Trader:</p>
-              <ul className="text-xs mt-1 space-y-1 list-disc list-inside">
-                <li>Test thoroughly with Backtest Worker</li>
-                <li>Validate with Fake Trader simulation</li>
-                <li>Start with TESTNET only</li>
-                <li>Use small amounts initially</li>
-                <li>Set conservative risk limits</li>
-              </ul>
-            </div>
-            <div>
-              <p className="font-medium">❌ Never:</p>
-              <ul className="text-xs mt-1 space-y-1 list-disc list-inside">
-                <li>Risk money you can't afford to lose</li>
-                <li>Use high leverage without experience</li>
-                <li>Leave trades unmonitored</li>
-                <li>Skip testnet validation</li>
-                <li>Trade without proper API setup</li>
-              </ul>
+      <div className="card-modern p-6 border-orange-500/30 bg-gradient-to-r from-orange-500/5 to-card">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 bg-orange-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
+            <span className="text-orange-400 text-xl">⚠️</span>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-xl font-bold text-orange-400 mb-3">Important Safety Notice</h3>
+            <p className="text-orange-200 font-medium mb-4">
+              This executes <span className="text-white font-bold">REAL trades with REAL money</span> on Binance Futures.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+                <p className="font-semibold text-green-400 mb-2">✅ Before using Real Trader:</p>
+                <ul className="text-sm text-green-200 space-y-1">
+                  <li>• Test thoroughly with Backtest Worker</li>
+                  <li>• Validate with Fake Trader simulation</li>
+                  <li>• Start with TESTNET only</li>
+                  <li>• Use small amounts initially</li>
+                  <li>• Set conservative risk limits</li>
+                </ul>
+              </div>
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+                <p className="font-semibold text-red-400 mb-2">❌ Never:</p>
+                <ul className="text-sm text-red-200 space-y-1">
+                  <li>• Risk money you can't afford to lose</li>
+                  <li>• Use high leverage without experience</li>
+                  <li>• Leave trades unmonitored</li>
+                  <li>• Skip testnet validation</li>
+                  <li>• Trade without proper API setup</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Notification */}
-      {notification && (
-        <div className={clsx(
-          'p-4 rounded-lg border flex items-center justify-between',
-          notification.type === 'success' && 'bg-green-500/10 border-green-500/20 text-green-400',
-          notification.type === 'error' && 'bg-red-500/10 border-red-500/20 text-red-400',
-          notification.type === 'warning' && 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'
-        )}>
-          <span className="text-sm">{notification.message}</span>
-          <button
-            onClick={() => setNotification(null)}
-            className="ml-4 text-xs opacity-70 hover:opacity-100"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
+      {/* Trading Interface */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Create Real Trader Form */}
-        <div className="rounded-xl border border-orange-500/30 bg-card p-4">
-          <h3 className="text-lg font-semibold mb-4 text-orange-400">Start New Real Trader</h3>
-          
+        <div className="card-modern p-6 border-orange-500/30 bg-gradient-to-br from-orange-500/5 to-card">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-orange-500/20 rounded-lg flex items-center justify-center">
+              <span className="text-orange-400 text-lg">🚀</span>
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-white">Start New Real Trader</h3>
+              <p className="text-slate-400 text-sm">Configure live trading parameters</p>
+            </div>
+          </div>
           <div className="space-y-4">
             {/* Environment Selection - PROMINENT */}
             <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/30">
@@ -481,9 +492,10 @@ export default function RealTraderPage() {
               <label className="block text-sm font-medium mb-1">Name *</label>
               <input
                 type="text"
-                className={`w-full bg-bg border rounded px-3 py-2 ${
+                className={clsx(
+                  'w-full bg-bg border rounded px-3 py-2',
                   validationErrors.name ? 'border-red-500' : 'border-border'
-                }`}
+                )}
                 value={formData.name}
                 onChange={(e) => {
                   setFormData(prev => ({ ...prev, name: e.target.value }));
@@ -507,9 +519,10 @@ export default function RealTraderPage() {
                   step="100"
                   min="100"
                   max={formData.testnet ? "100000" : "10000"}
-                  className={`w-full bg-bg border rounded px-3 py-2 ${
+                  className={clsx(
+                    'w-full bg-bg border rounded px-3 py-2',
                     validationErrors.startingCapital ? 'border-red-500' : 'border-border'
-                  }`}
+                  )}
                   value={formData.startingCapital}
                   onChange={(e) => {
                     setFormData(prev => ({ ...prev, startingCapital: parseFloat(e.target.value) || 0 }));
@@ -526,16 +539,17 @@ export default function RealTraderPage() {
                   Minimum $100, Max: {formData.testnet ? '$100K (testnet)' : '$10K (mainnet)'}
                 </p>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium mb-1">Max Position Size ($) *</label>
                 <input
                   type="number"
                   step="50"
                   min="50"
-                  className={`w-full bg-bg border rounded px-3 py-2 ${
+                  className={clsx(
+                    'w-full bg-bg border rounded px-3 py-2',
                     validationErrors.maxPositionSizeUsd ? 'border-red-500' : 'border-border'
-                  }`}
+                  )}
                   value={formData.maxPositionSizeUsd}
                   onChange={(e) => {
                     setFormData(prev => ({ ...prev, maxPositionSizeUsd: parseFloat(e.target.value) || 0 }));
@@ -574,9 +588,10 @@ export default function RealTraderPage() {
                     step="0.5"
                     min="0.1"
                     max="20"
-                    className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                    className={clsx(
+                      'w-full bg-bg border rounded px-2 py-1 text-sm',
                       validationErrors.dailyLossLimitPct ? 'border-red-500' : 'border-border'
-                    }`}
+                    )}
                     value={formData.dailyLossLimitPct}
                     onChange={(e) => {
                       setFormData(prev => ({ ...prev, dailyLossLimitPct: parseFloat(e.target.value) || 0 }));
@@ -596,9 +611,10 @@ export default function RealTraderPage() {
                     step="1"
                     min="1"
                     max="50"
-                    className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                    className={clsx(
+                      'w-full bg-bg border rounded px-2 py-1 text-sm',
                       validationErrors.maxDrawdownPct ? 'border-red-500' : 'border-border'
-                    }`}
+                    )}
                     value={formData.maxDrawdownPct}
                     onChange={(e) => {
                       setFormData(prev => ({ ...prev, maxDrawdownPct: parseFloat(e.target.value) || 0 }));
@@ -634,9 +650,10 @@ export default function RealTraderPage() {
                   ({formData.selectedSymbols.length} selected)
                 </span>
               </div>
-              <div className={`grid grid-cols-3 gap-1 max-h-32 overflow-y-auto bg-bg border rounded p-2 ${
+              <div className={clsx(
+                'grid grid-cols-3 gap-1 max-h-32 overflow-y-auto bg-bg border rounded p-2',
                 validationErrors.symbols ? 'border-red-500' : 'border-border'
-              }`}>
+              )}>
                 {symbols.map(symbol => (
                   <label key={symbol} className="flex items-center text-xs cursor-pointer">
                     <input
@@ -683,9 +700,10 @@ export default function RealTraderPage() {
                       type="number"
                       step="0.1"
                       min="0.5"
-                      className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                      className={clsx(
+                        'w-full bg-bg border rounded px-2 py-1 text-sm',
                         validationErrors.minRoc5m ? 'border-red-500' : 'border-border'
-                      }`}
+                      )}
                       value={formData.minRoc5m}
                       onChange={(e) => {
                         setFormData(prev => ({ ...prev, minRoc5m: parseFloat(e.target.value) || 0 }));
@@ -704,9 +722,10 @@ export default function RealTraderPage() {
                       type="number"
                       step="0.1"
                       min="1"
-                      className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                      className={clsx(
+                        'w-full bg-bg border rounded px-2 py-1 text-sm',
                         validationErrors.minVolMult ? 'border-red-500' : 'border-border'
-                      }`}
+                      )}
                       value={formData.minVolMult}
                       onChange={(e) => {
                         setFormData(prev => ({ ...prev, minVolMult: parseFloat(e.target.value) || 0 }));
@@ -767,9 +786,10 @@ export default function RealTraderPage() {
                     step="1"
                     min="1"
                     max="20"
-                    className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                    className={clsx(
+                      'w-full bg-bg border rounded px-2 py-1 text-sm',
                       validationErrors.leverage ? 'border-red-500' : 'border-border'
-                    }`}
+                    )}
                     value={formData.leverage}
                     onChange={(e) => {
                       setFormData(prev => ({ ...prev, leverage: parseFloat(e.target.value) || 1 }));
@@ -792,20 +812,20 @@ export default function RealTraderPage() {
               onClick={submitRealTrader}
               disabled={loading}
               className={clsx(
-                'w-full py-3 px-4 rounded font-medium text-lg',
-                loading 
-                  ? 'bg-gray-600 cursor-not-allowed' 
+                'w-full py-3 px-4 rounded-lg font-medium text-lg',
+                loading
+                  ? 'bg-gray-600 cursor-not-allowed'
                   : formData.testnet
                   ? 'bg-green-600 hover:bg-green-700'
                   : 'bg-red-600 hover:bg-red-700'
               )}
             >
-              {loading 
-                ? 'Starting Real Trader...' 
+              {loading
+                ? 'Starting Real Trader...'
                 : `Start Real Trader (${formData.testnet ? 'TESTNET' : 'MAINNET'})`
               }
             </button>
-            
+
             {!formData.testnet && (
               <p className="text-red-300 text-xs text-center">
                 ⚠️ MAINNET trading uses real money. Start with testnet first!
@@ -814,10 +834,9 @@ export default function RealTraderPage() {
           </div>
         </div>
 
-        {/* Real Trader Runs */}
-        <div className="rounded-xl border border-orange-500/30 bg-card p-4 flex flex-col h-full">
+        <div className="card-modern p-6 flex flex-col h-full">
           <h3 className="text-lg font-semibold mb-4 text-orange-400">Trading Runs</h3>
-          
+
           {/* Active Runs */}
           <div className="mb-6">
             <h4 className="text-sm font-medium text-green-400 mb-2">🟢 Active Runs ({activeRuns.length})</h4>
@@ -830,8 +849,8 @@ export default function RealTraderPage() {
                       key={run.run_id}
                       className={clsx(
                         'p-3 border rounded cursor-pointer transition-colors',
-                        selectedRunId === run.run_id 
-                          ? 'border-green-500 bg-green-500/10' 
+                        selectedRunId === run.run_id
+                          ? 'border-green-500 bg-green-500/10'
                           : 'border-green-500/50 bg-green-500/5 hover:border-green-500'
                       )}
                       onClick={() => {
@@ -844,8 +863,8 @@ export default function RealTraderPage() {
                             <div className="font-medium text-sm">{run.name || 'Unnamed'}</div>
                             <span className={clsx(
                               'px-2 py-1 rounded text-xs font-medium',
-                              run.testnet 
-                                ? 'bg-blue-500/20 text-blue-400' 
+                              run.testnet
+                                ? 'bg-blue-500/20 text-blue-400'
                                 : 'bg-red-500/20 text-red-400'
                             )}>
                               {run.testnet ? '🧪 TESTNET' : '💰 MAINNET'}
@@ -903,7 +922,7 @@ export default function RealTraderPage() {
                           </div>
                         </div>
                       </div>
-                      
+
                       {selectedRunId === run.run_id && (
                         <div className="mt-3 pt-3 border-t border-border/50">
                           <div className="text-sm space-y-2">
@@ -917,7 +936,6 @@ export default function RealTraderPage() {
                                 <div className="font-medium text-xs">{formatTimestamp(run.last_update)}</div>
                               </div>
                             </div>
-                            
                             <div className="grid grid-cols-2 gap-4">
                               <div>
                                 <span className="text-sub">Max Position:</span>
@@ -928,7 +946,7 @@ export default function RealTraderPage() {
                                 <div className="font-medium text-xs">{run.daily_loss_limit_pct}%</div>
                               </div>
                             </div>
-                            
+
                             {run.symbols.length > 0 && (
                               <div>
                                 <span className="text-sub">Symbols:</span>
@@ -941,7 +959,7 @@ export default function RealTraderPage() {
                                 </div>
                               </div>
                             )}
-                            
+
                             <div className="flex justify-end mt-4 pt-3 border-t border-border/50">
                               <button
                                 onClick={(e) => {
@@ -981,8 +999,8 @@ export default function RealTraderPage() {
                     key={run.run_id}
                     className={clsx(
                       'p-3 border rounded cursor-pointer transition-colors',
-                      selectedRunId === run.run_id 
-                        ? 'border-blue-500 bg-blue-500/10' 
+                      selectedRunId === run.run_id
+                        ? 'border-blue-500 bg-blue-500/10'
                         : 'border-border hover:border-gray-500'
                     )}
                     onClick={() => {
@@ -995,15 +1013,15 @@ export default function RealTraderPage() {
                           <div className="font-medium text-sm">{run.name || 'Unnamed'}</div>
                           <span className={clsx(
                             'px-2 py-1 rounded text-xs font-medium',
-                            run.testnet 
-                              ? 'bg-blue-500/20 text-blue-400' 
+                            run.testnet
+                              ? 'bg-blue-500/20 text-blue-400'
                               : 'bg-red-500/20 text-red-400'
                           )}>
                             {run.testnet ? '🧪 TESTNET' : '💰 MAINNET'}
                           </span>
                         </div>
                         <div className="text-xs text-sub">
-                          {run.symbols.length} symbols • {run.strategy_name} • 
+                          {run.symbols.length} symbols • {run.strategy_name} •
                           {formatTimestamp(run.started_at)}
                         </div>
                         <div className="text-xs mt-1">
@@ -1041,7 +1059,7 @@ export default function RealTraderPage() {
                         )}
                       </div>
                     </div>
-                    
+
                     {selectedRunId === run.run_id && (
                       <div className="mt-3 pt-3 border-t border-border/50">
                         <div className="text-sm space-y-2">
@@ -1057,7 +1075,7 @@ export default function RealTraderPage() {
                               </div>
                             </div>
                           </div>
-                          
+
                           {run.symbols.length > 0 && (
                             <div>
                               <span className="text-sub">Symbols:</span>
@@ -1079,7 +1097,7 @@ export default function RealTraderPage() {
                               </div>
                             </div>
                           )}
-                          
+
                           <div className="flex justify-end mt-4 pt-3 border-t border-border/50">
                             <button
                               onClick={(e) => {
@@ -1106,6 +1124,6 @@ export default function RealTraderPage() {
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

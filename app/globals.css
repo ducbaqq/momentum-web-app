@@ -2,8 +2,99 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body {
-    background: #0b0e11;
-    color: #e6e6e6;
+@layer base {
+  html,
+  body {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    color: #f1f5f9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #1e293b;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+  }
+
+  /* Smooth transitions */
+  * {
+    transition-property: color, background-color, border-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
+}
+
+@layer components {
+  /* Modern card component */
+  .card-modern {
+    @apply bg-card border border-border rounded-xl shadow-card hover:shadow-card-hover transition-all duration-200;
+  }
+
+  /* Status badges */
+  .status-badge {
+    @apply px-2 py-1 rounded-full text-xs font-medium;
+  }
+
+  .status-active {
+    @apply bg-success/20 text-success border border-success/30;
+  }
+
+  .status-inactive {
+    @apply bg-slate-500/20 text-slate-400 border border-slate-500/30;
+  }
+
+  .status-error {
+    @apply bg-danger/20 text-danger border border-danger/30;
+  }
+
+  .status-warning {
+    @apply bg-warning/20 text-warning border border-warning/30;
+  }
+
+  /* Modern buttons */
+  .btn-primary {
+    @apply bg-accent hover:bg-accentHover text-white font-medium px-4 py-2 rounded-lg shadow-glow transition-all duration-200 hover:shadow-lg;
+  }
+
+  .btn-success {
+    @apply bg-success hover:bg-successLight text-white font-medium px-4 py-2 rounded-lg shadow-glow-success transition-all duration-200 hover:shadow-lg;
+  }
+
+  .btn-danger {
+    @apply bg-danger hover:bg-dangerLight text-white font-medium px-4 py-2 rounded-lg shadow-glow-danger transition-all duration-200 hover:shadow-lg;
+  }
+
+  /* Form inputs */
+  .input-modern {
+    @apply bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent transition-colors;
+  }
+
+  /* Grid layouts */
+  .grid-responsive {
+    @apply grid gap-4;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+
+  @media (max-width: 640px) {
+    .grid-responsive {
+      grid-template-columns: 1fr;
+    }
+  }
 }
