@@ -1,5 +1,6 @@
 import pg from 'pg';
 import type { RunRow, Candle } from './types.js';
+import { getTimeframeMinutes } from './utils.js';
 const { Pool } = pg;
 
 export const pool = new Pool({
@@ -190,56 +191,124 @@ export async function writeResults(run_id: string, symbol: string, result: any) 
   }
 }
 
-export async function loadCandlesWithFeatures(symbol: string, start: string, end: string): Promise<Candle[]> {
+// Helper function to process database rows into Candle objects
+function processRow(r: any): Candle {
+  return {
+    ts: r.ts,
+    open: Number(r.open),
+    high: Number(r.high),
+    low: Number(r.low),
+    close: Number(r.close),
+    volume: Number(r.volume),
+    trades_count: r.trades_count ? Number(r.trades_count) : null,
+    vwap_minute: r.vwap_minute ? Number(r.vwap_minute) : null,
+    roc_1m: r.roc_1m,
+    roc_5m: r.roc_5m,
+    roc_15m: r.roc_15m,
+    roc_30m: r.roc_30m,
+    roc_1h: r.roc_1h,
+    roc_4h: r.roc_4h,
+    rsi_14: r.rsi_14,
+    ema_12: r.ema_12,
+    ema_20: r.ema_20,
+    ema_26: r.ema_26,
+    ema_50: r.ema_50,
+    macd: r.macd,
+    macd_signal: r.macd_signal,
+    bb_upper: r.bb_upper,
+    bb_lower: r.bb_lower,
+    bb_basis: r.bb_basis,
+    vol_avg_20: r.vol_avg_20,
+    vol_mult: r.vol_mult,
+    book_imb: r.book_imb,
+    spread_bps: r.spread_bps
+  };
+}
+
+export async function loadCandlesWithFeatures(symbol: string, start: string, end: string, timeframe: string = '1m'): Promise<Candle[]> {
   try {
+    // If timeframe is 1m, use the original simple query
+    if (timeframe === '1m') {
+      const q = await pool.query(
+            `SELECT
+         o.ts,
+         o.open, o.high, o.low, o.close, o.volume, o.trades_count, o.vwap_minute,
+         f.roc_1m, f.roc_5m, f.roc_15m, f.roc_30m, f.roc_1h, f.roc_4h,
+         f.rsi_14, f.ema_12, f.ema_20, f.ema_26, f.ema_50, f.macd, f.macd_signal,
+         f.bb_upper, f.bb_lower, f.bb_basis, f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
+       FROM ohlcv_1m o
+       LEFT JOIN features_1m f ON f.symbol=o.symbol AND f.ts=o.ts
+       WHERE o.symbol=$1 AND o.ts >= $2 AND o.ts <= $3
+       ORDER BY o.ts ASC`,
+        [symbol, start, end]
+      );
+      return q.rows.map(processRow);
+    }
+
+    // For higher timeframes, aggregate using the same approach as download-candles API
+    const timeframeMinutes = getTimeframeMinutes(timeframe as any);
     const q = await pool.query(
-          `SELECT
-       o.ts,
-       o.open, o.high, o.low, o.close, o.volume, o.trades_count, o.vwap_minute,
-       f.roc_1m, f.roc_5m, f.roc_15m, f.roc_30m, f.roc_1h, f.roc_4h,
-       f.rsi_14, f.ema_12, f.ema_20, f.ema_26, f.ema_50, f.macd, f.macd_signal,
-       f.bb_upper, f.bb_lower, f.bb_basis, f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
-     FROM ohlcv_1m o
-     LEFT JOIN features_1m f ON f.symbol=o.symbol AND f.ts=o.ts
-     WHERE o.symbol=$1 AND o.ts >= $2 AND o.ts <= $3
-     ORDER BY o.ts ASC`,
-      [symbol, start, end]
+      `WITH base AS (
+        SELECT
+          o.ts,
+          o.open::double precision AS open, o.high::double precision AS high,
+          o.low::double precision AS low, o.close::double precision AS close,
+          o.volume::double precision AS volume, o.trades_count, o.vwap_minute,
+          f.roc_1m, f.roc_5m, f.roc_15m, f.roc_30m, f.roc_1h, f.roc_4h,
+          f.rsi_14, f.ema_12, f.ema_20, f.ema_26, f.ema_50, f.macd, f.macd_signal,
+          f.bb_upper, f.bb_lower, f.bb_basis, f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
+        FROM ohlcv_1m o
+        LEFT JOIN features_1m f ON f.symbol=o.symbol AND f.ts=o.ts
+        WHERE o.symbol=$1 AND o.ts >= $2::timestamp AND o.ts <= $3::timestamp
+      ),
+      buckets AS (
+        SELECT *,
+          to_timestamp(floor(extract(epoch from ts) / ($4::int*60)) * ($4::int*60)) AT TIME ZONE 'UTC' AS bucket
+        FROM base
+      ),
+      agg AS (
+        SELECT
+          bucket AS ts,
+          (ARRAY_AGG(open ORDER BY ts))[1] AS open,
+          MAX(high) AS high,
+          MIN(low) AS low,
+          (ARRAY_AGG(close ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(close), 1)] AS close,
+          SUM(volume) AS volume,
+          SUM(trades_count) AS trades_count,
+          (ARRAY_AGG(vwap_minute ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(vwap_minute), 1)] AS vwap_minute,
+          -- For technical indicators, use values from the last candle in the bucket
+          (ARRAY_AGG(roc_1m ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(roc_1m), 1)] AS roc_1m,
+          (ARRAY_AGG(roc_5m ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(roc_5m), 1)] AS roc_5m,
+          (ARRAY_AGG(roc_15m ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(roc_15m), 1)] AS roc_15m,
+          (ARRAY_AGG(roc_30m ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(roc_30m), 1)] AS roc_30m,
+          (ARRAY_AGG(roc_1h ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(roc_1h), 1)] AS roc_1h,
+          (ARRAY_AGG(roc_4h ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(roc_4h), 1)] AS roc_4h,
+          (ARRAY_AGG(rsi_14 ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(rsi_14), 1)] AS rsi_14,
+          (ARRAY_AGG(ema_12 ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(ema_12), 1)] AS ema_12,
+          (ARRAY_AGG(ema_20 ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(ema_20), 1)] AS ema_20,
+          (ARRAY_AGG(ema_26 ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(ema_26), 1)] AS ema_26,
+          (ARRAY_AGG(ema_50 ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(ema_50), 1)] AS ema_50,
+          (ARRAY_AGG(macd ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(macd), 1)] AS macd,
+          (ARRAY_AGG(macd_signal ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(macd_signal), 1)] AS macd_signal,
+          (ARRAY_AGG(bb_upper ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(bb_upper), 1)] AS bb_upper,
+          (ARRAY_AGG(bb_lower ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(bb_lower), 1)] AS bb_lower,
+          (ARRAY_AGG(bb_basis ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(bb_basis), 1)] AS bb_basis,
+          (ARRAY_AGG(vol_avg_20 ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(vol_avg_20), 1)] AS vol_avg_20,
+          (ARRAY_AGG(vol_mult ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(vol_mult), 1)] AS vol_mult,
+          (ARRAY_AGG(book_imb ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(book_imb), 1)] AS book_imb,
+          (ARRAY_AGG(spread_bps ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(spread_bps), 1)] AS spread_bps
+        FROM buckets
+        GROUP BY bucket
+        HAVING COUNT(*) > 0
+      )
+      SELECT * FROM agg ORDER BY ts ASC`,
+      [symbol, start, end, timeframeMinutes]
     );
-    
     if (q.rows.length === 0) {
       throw new Error(`No OHLCV data found for ${symbol} between ${start} and ${end}`);
     }
-    
-    return q.rows.map(r => ({
-      ts: r.ts,
-      open: Number(r.open), 
-      high: Number(r.high), 
-      low: Number(r.low),
-      close: Number(r.close), 
-      volume: Number(r.volume),
-      trades_count: r.trades_count ? Number(r.trades_count) : null,
-      vwap_minute: r.vwap_minute ? Number(r.vwap_minute) : null,
-      roc_1m: r.roc_1m, 
-      roc_5m: r.roc_5m, 
-      roc_15m: r.roc_15m, 
-      roc_30m: r.roc_30m, 
-      roc_1h: r.roc_1h, 
-      roc_4h: r.roc_4h,
-      rsi_14: r.rsi_14, 
-      ema_12: r.ema_12,
-      ema_20: r.ema_20,
-      ema_26: r.ema_26, 
-      ema_50: r.ema_50, 
-      macd: r.macd, 
-      macd_signal: r.macd_signal,
-      bb_upper: r.bb_upper, 
-      bb_lower: r.bb_lower, 
-      bb_basis: r.bb_basis,
-      vol_avg_20: r.vol_avg_20, 
-      vol_mult: r.vol_mult,
-      book_imb: r.book_imb, 
-      spread_bps: r.spread_bps
-    }));
+
+    return q.rows.map(processRow);
   } catch (error) {
     console.error(`Error loading candles for ${symbol}:`, error);
     throw new Error(`Failed to load candles for ${symbol}: ${error instanceof Error ? error.message : String(error)}`);

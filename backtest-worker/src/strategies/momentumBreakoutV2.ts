@@ -4,7 +4,7 @@ import type { Candle } from '../types.js';
 import type { ProfessionalCandle } from '../trading/DataLoader.js';
 
 export interface MomentumParams {
-  minRoc5m: number;        // Min 5-minute ROC (%)
+  minRoc5m: number;        // Min ROC threshold (%) - used for all timeframes
   minVolMult: number;      // Min volume multiplier
   maxSpreadBps: number;    // Max spread in bps
   leverage: number;        // Position leverage
