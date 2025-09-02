@@ -197,14 +197,14 @@ class FakeTrader {
     // Update existing positions with current prices
     await this.updateExistingPositions(run, livePrices);
     
-    // Get recent 1-minute candles like backtest does
-    console.log(`   📊 Evaluating entry signals using recent 1-minute candles (matching backtest behavior)`);
+    // Get recent candles at the configured timeframe
+    console.log(`   📊 Evaluating entry signals using recent ${run.timeframe} candles`);
+
+    // Get recent candles for all symbols (look back 60 minutes, but aggregated to timeframe)
+    const recentCandles = await getRecentCandles(run.symbols, 60, run.timeframe);
     
-    // Get recent 1-minute candles for all symbols (look back 60 minutes)
-    const recentCandles = await getRecentCandles(run.symbols, 60);
-    
-    // Get strategy function
-    const strategy = getStrategy(run.strategy_name);
+    // Get momentum_breakout_v2 strategy function
+    const strategy = getStrategy('momentum_breakout_v2');
     
     // Process each symbol's recent candles for entry signals
     for (const symbol of run.symbols) {
@@ -343,7 +343,7 @@ class FakeTrader {
     candle: Candle, 
     strategy: Function
   ) {
-    console.log(`\n  📊 Evaluating entry signals for ${symbol} @ $${candle.close} (15m candle: ${candle.ts})`);
+    console.log(`\n  📊 Evaluating entry signals for ${symbol} @ $${candle.close} (${run.timeframe} candle: ${candle.ts})`);
     
     // Get current positions for this symbol
     const positions = await getCurrentPositions(run.run_id);
@@ -354,7 +354,8 @@ class FakeTrader {
       runId: run.run_id,
       symbol: symbol,
       currentCapital: run.current_capital,
-      positions: symbolPositions
+      positions: symbolPositions,
+      timeframe: run.timeframe
     };
     
     // Generate trading signals
