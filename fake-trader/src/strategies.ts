@@ -59,9 +59,8 @@ export function momentumBreakoutStrategy(
     const volMult = candle.vol_mult ?? 1;
     const spreadBps = candle.spread_bps ?? 0;
     
-    // Convert parameter from percentage to decimal to match ROC data format (backtest behavior)
-    const minRoc5mDecimal = minRoc5m / 100;
-    const momentumOk = roc5m >= minRoc5mDecimal;
+    // ROC data is already in decimal format, use parameter directly
+    const momentumOk = roc5m >= minRoc5m;
     const volumeOk = volMult >= minVolMult;
     const spreadOk = spreadBps <= maxSpreadBps;
     
@@ -126,9 +125,8 @@ export function momentumBreakoutV2Strategy(
     }
   } else {
     // Check entry conditions
-    // Convert parameter from percentage to decimal to match ROC data format (backtest behavior)
-    const minRoc5mDecimal = minRoc5m / 100; // Convert parameter from percentage to decimal
-    const momentumOk = roc5m >= minRoc5mDecimal;
+    // ROC data is already in decimal format, use parameter directly
+    const momentumOk = roc5m >= minRoc5m;
     const volumeOk = volMult >= minVolMult;
     const spreadOk = spreadBps <= maxSpreadBps;
     
