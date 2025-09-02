@@ -4,6 +4,7 @@ export declare const pool: Pool;
 export declare function testConnection(): Promise<void>;
 export declare function getActiveRuns(): Promise<RealTradeRun[]>;
 export declare function getLivePrices(symbols: string[]): Promise<Record<string, number>>;
+export declare function getRecentCandles(symbols: string[], lookbackMinutes?: number): Promise<Record<string, Candle[]>>;
 export declare function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle>>;
 export declare function hasNew15mCandles(symbols: string[], lastCheckTime?: string): Promise<boolean>;
 export declare function updateLastProcessedCandle(runId: string, timestamp: string): Promise<void>;

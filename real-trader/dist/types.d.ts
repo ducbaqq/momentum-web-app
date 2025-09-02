@@ -203,29 +203,34 @@ export interface RealSignal {
 }
 export interface Candle {
     ts: string;
+    symbol?: string;
     open: number;
     high: number;
     low: number;
     close: number;
     volume: number;
-    roc_1m?: number;
-    roc_5m?: number;
-    roc_15m?: number;
-    roc_30m?: number;
-    roc_1h?: number;
-    roc_4h?: number;
-    rsi_14?: number;
-    ema_20?: number;
-    ema_50?: number;
-    ema_200?: number;
-    macd?: number;
-    macd_signal?: number;
-    bb_upper?: number;
-    bb_lower?: number;
-    vol_avg_20?: number;
-    vol_mult?: number;
-    book_imb?: number;
-    spread_bps?: number;
+    roc_1m?: number | null;
+    roc_5m?: number | null;
+    roc_15m?: number | null;
+    roc_30m?: number | null;
+    roc_1h?: number | null;
+    roc_4h?: number | null;
+    rsi_14?: number | null;
+    ema_12?: number | null;
+    ema_20?: number | null;
+    ema_26?: number | null;
+    ema_50?: number | null;
+    macd?: number | null;
+    macd_signal?: number | null;
+    bb_upper?: number | null;
+    bb_lower?: number | null;
+    bb_basis?: number | null;
+    vol_avg_20?: number | null;
+    vol_mult?: number | null;
+    book_imb?: number | null;
+    spread_bps?: number | null;
+    trades_count?: number | null;
+    vwap_minute?: number | null;
 }
 export interface BinanceConfig {
     apiKey: string;

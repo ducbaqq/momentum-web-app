@@ -59,7 +59,9 @@ export function momentumBreakoutStrategy(
     const volMult = candle.vol_mult ?? 1;
     const spreadBps = candle.spread_bps ?? 0;
     
-    const momentumOk = roc5m >= minRoc5m;
+    // Convert parameter from percentage to decimal to match ROC data format (backtest behavior)
+    const minRoc5mDecimal = minRoc5m / 100;
+    const momentumOk = roc5m >= minRoc5mDecimal;
     const volumeOk = volMult >= minVolMult;
     const spreadOk = spreadBps <= maxSpreadBps;
     
@@ -124,12 +126,14 @@ export function momentumBreakoutV2Strategy(
     }
   } else {
     // Check entry conditions
-    const momentumOk = roc5m >= minRoc5m;
+    // Convert parameter from percentage to decimal to match ROC data format (backtest behavior)
+    const minRoc5mDecimal = minRoc5m / 100;
+    const momentumOk = roc5m >= minRoc5mDecimal;
     const volumeOk = volMult >= minVolMult;
     const spreadOk = spreadBps <= maxSpreadBps;
     
     if (momentumOk && volumeOk && spreadOk) {
-      console.log(`[${state.symbol}] 🚀 ENTRY SIGNAL: roc5m=${roc5m}%, volMult=${volMult}x, spread=${spreadBps}bps`);
+      console.log(`[${state.symbol}] 🚀 ENTRY SIGNAL: roc5m=${(roc5m * 100).toFixed(2)}% (>=${minRoc5m}%), volMult=${volMult.toFixed(2)}x (>=${minVolMult}), spread=${spreadBps.toFixed(1)}bps (<=${maxSpreadBps})`);
       
       // Calculate position size based on risk percentage
       const riskAmount = state.currentCapital * (riskPct / 100);

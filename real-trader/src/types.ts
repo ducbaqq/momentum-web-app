@@ -253,32 +253,39 @@ export interface RealSignal {
 }
 
 export interface Candle {
-  ts: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
+  ts: string; // ISO timestamp string, matches database timestamp format
+  symbol?: string; // Optional: symbol for multi-asset contexts
+  open: number; 
+  high: number; 
+  low: number; 
+  close: number; 
   volume: number;
   
-  // Technical indicators
-  roc_1m?: number;
-  roc_5m?: number;
-  roc_15m?: number;
-  roc_30m?: number;
-  roc_1h?: number;
-  roc_4h?: number;
-  rsi_14?: number;
-  ema_20?: number;
-  ema_50?: number;
-  ema_200?: number;
-  macd?: number;
-  macd_signal?: number;
-  bb_upper?: number;
-  bb_lower?: number;
-  vol_avg_20?: number;
-  vol_mult?: number;
-  book_imb?: number;
-  spread_bps?: number;
+  // Technical features from features_1m table
+  roc_1m?: number | null;
+  roc_5m?: number | null;
+  roc_15m?: number | null;
+  roc_30m?: number | null;
+  roc_1h?: number | null;
+  roc_4h?: number | null;
+  rsi_14?: number | null;
+  ema_12?: number | null; // Added missing ema_12
+  ema_20?: number | null;
+  ema_26?: number | null; // Added missing ema_26
+  ema_50?: number | null;
+  macd?: number | null;
+  macd_signal?: number | null;
+  bb_upper?: number | null;
+  bb_lower?: number | null;
+  bb_basis?: number | null; // Added missing bb_basis
+  vol_avg_20?: number | null;
+  vol_mult?: number | null;
+  book_imb?: number | null;
+  spread_bps?: number | null;
+  
+  // Additional fields that may be present in some queries
+  trades_count?: number | null; // From ohlcv_1m table
+  vwap_minute?: number | null;  // From ohlcv_1m table
 }
 
 // Binance API types
