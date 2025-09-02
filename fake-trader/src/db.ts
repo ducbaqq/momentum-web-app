@@ -100,6 +100,75 @@ function getMostRecentCompleted15mPeriod(): Date {
 }
 
 // Get completed 15m candle data for entry signals (using aggregated 1m data with pre-calculated features)
+// Get recent 1-minute candles like backtest does - this matches backtest behavior exactly
+export async function getRecentCandles(symbols: string[], lookbackMinutes: number = 60): Promise<Record<string, Candle[]>> {
+  const endTime = new Date();
+  const startTime = new Date(endTime.getTime() - lookbackMinutes * 60 * 1000);
+  
+  console.log(`🔍 [FAKE TRADER] Fetching 1m candles from ${startTime.toISOString()} to ${endTime.toISOString()}`);
+  
+  const query = `
+    SELECT
+      o.symbol,
+      o.ts,
+      o.open, o.high, o.low, o.close, o.volume, o.trades_count, o.vwap_minute,
+      f.roc_1m, f.roc_5m, f.roc_15m, f.roc_30m, f.roc_1h, f.roc_4h,
+      f.rsi_14, f.ema_12, f.ema_20, f.ema_26, f.ema_50, f.macd, f.macd_signal,
+      f.bb_upper, f.bb_lower, f.bb_basis, f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
+    FROM ohlcv_1m o
+    LEFT JOIN features_1m f ON f.symbol=o.symbol AND f.ts=o.ts
+    WHERE o.symbol = ANY($1) AND o.ts >= $2 AND o.ts <= $3
+    ORDER BY o.symbol, o.ts ASC
+  `;
+  
+  const result = await pool.query(query, [symbols, startTime.toISOString(), endTime.toISOString()]);
+  
+  console.log(`🔍 [FAKE TRADER] Found ${result.rows.length} 1-minute candles across ${symbols.length} symbols`);
+  
+  const candlesBySymbol: Record<string, Candle[]> = {};
+  
+  for (const symbol of symbols) {
+    candlesBySymbol[symbol] = [];
+  }
+  
+  for (const row of result.rows) {
+    const candle: Candle = {
+      ts: row.ts,
+      open: Number(row.open), 
+      high: Number(row.high), 
+      low: Number(row.low),
+      close: Number(row.close), 
+      volume: Number(row.volume),
+      trades_count: row.trades_count ? Number(row.trades_count) : null,
+      vwap_minute: row.vwap_minute ? Number(row.vwap_minute) : null,
+      roc_1m: row.roc_1m, 
+      roc_5m: row.roc_5m, 
+      roc_15m: row.roc_15m, 
+      roc_30m: row.roc_30m, 
+      roc_1h: row.roc_1h, 
+      roc_4h: row.roc_4h,
+      rsi_14: row.rsi_14, 
+      ema_12: row.ema_12,
+      ema_20: row.ema_20,
+      ema_26: row.ema_26, 
+      ema_50: row.ema_50, 
+      macd: row.macd, 
+      macd_signal: row.macd_signal,
+      bb_upper: row.bb_upper, 
+      bb_lower: row.bb_lower, 
+      bb_basis: row.bb_basis,
+      vol_avg_20: row.vol_avg_20, 
+      vol_mult: row.vol_mult,
+      book_imb: row.book_imb, 
+      spread_bps: row.spread_bps
+    };
+    
+    candlesBySymbol[row.symbol].push(candle);
+  }
+  
+  return candlesBySymbol;
+}
+
 export async function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle>> {
   // Calculate the target 15-minute period to fetch
   const targetPeriod = getMostRecentCompleted15mPeriod();
@@ -180,7 +249,7 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
       rsi_14: Number(row.rsi_14) || 50,
       ema_20: Number(row.ema_20) || Number(row.close),
       ema_50: Number(row.ema_50) || Number(row.close),
-      ema_200: Number(row.ema_50) || Number(row.close), // Use ema_50 as fallback for ema_200
+      // ema_200 removed - not in backtest interface
       macd: 0, // Not available in current features
       macd_signal: 0,
       bb_upper: Number(row.bb_upper) || Number(row.close) * 1.02,
@@ -299,7 +368,7 @@ export async function getCurrentCandles(symbols: string[]): Promise<Record<strin
       rsi_14: row.rsi_14,
       ema_20: row.ema_20,
       ema_50: row.ema_50,
-      ema_200: row.ema_50, // Use ema_50 as proxy for ema_200
+      // ema_200 removed - not in backtest interface
       macd: row.macd,
       macd_signal: row.macd_signal,
       bb_upper: row.bb_upper,

@@ -5,6 +5,7 @@ import {
   getActiveRuns, 
   getCurrentCandles,
   getCompleted15mCandles,
+  getRecentCandles,
   getLivePrices,
   hasNew15mCandles,
   getLastProcessedCandle,
@@ -196,30 +197,36 @@ class FakeTrader {
     // Update existing positions with current prices
     await this.updateExistingPositions(run, livePrices);
     
-    // Get the most recent completed 15m candles for entry signal evaluation
-    console.log(`   📊 Evaluating entry signals for most recent completed 15m period`);
+    // Get recent 1-minute candles like backtest does
+    console.log(`   📊 Evaluating entry signals using recent 1-minute candles (matching backtest behavior)`);
     
-    // Get completed 15m candles for entry signal evaluation
-    const completed15mCandles = await getCompleted15mCandles(run.symbols);
-    
-    // Check if we have data for all symbols
-    const missingData = run.symbols.filter(symbol => !completed15mCandles[symbol]);
-    if (missingData.length > 0) {
-      console.log(`⚠️  Missing 15m candle data for symbols: ${missingData.join(', ')}`);
-    }
+    // Get recent 1-minute candles for all symbols (look back 60 minutes)
+    const recentCandles = await getRecentCandles(run.symbols, 60);
     
     // Get strategy function
     const strategy = getStrategy(run.strategy_name);
     
-    // Process each symbol for entry signals
+    // Process each symbol's recent candles for entry signals
     for (const symbol of run.symbols) {
-      const candle = completed15mCandles[symbol];
-      if (!candle) {
-        console.log(`⏭️  Skipping ${symbol} - no 15m candle data`);
+      const candles = recentCandles[symbol] || [];
+      if (candles.length === 0) {
+        console.log(`⏭️  Skipping ${symbol} - no recent candle data`);
         continue;
       }
       
-      await this.processSymbolEntrySignals(run, symbol, candle, strategy);
+      console.log(`   📊 Processing ${candles.length} recent 1-minute candles for ${symbol}`);
+      
+      // Process each candle like the backtest does
+      for (let i = candles.length - 5; i < candles.length; i++) { // Only check last 5 candles to avoid spam
+        if (i < 0) continue;
+        
+        const candle = candles[i];
+        await this.processSymbolEntrySignals(run, symbol, candle, strategy);
+        
+        // Only process one candle at a time to avoid multiple simultaneous trades
+        // In the next cycle, we'll process newer candles
+        break;
+      }
     }
     
     // Update run's last update timestamp and check if winding down run should be stopped
