@@ -18,6 +18,27 @@ export interface StrategyState {
   currentCapital: number;
   positions: FakePosition[];
   lastCandle?: Candle;
+  timeframe?: string;
+}
+
+// Helper function to get the appropriate ROC field based on timeframe
+function getRocField(timeframe: string): string {
+  switch (timeframe) {
+    case '1m': return 'roc_1m';
+    case '5m': return 'roc_5m';
+    case '15m': return 'roc_15m';
+    case '30m': return 'roc_30m';
+    case '1h': return 'roc_1h';
+    case '4h': return 'roc_4h';
+    case '1d': return 'roc_4h'; // Use 4h as proxy for daily
+    default: return 'roc_5m'; // Default fallback
+  }
+}
+
+// Helper function to get ROC value from candle based on timeframe
+function getRocValue(candle: Candle, timeframe: string): number {
+  const rocField = getRocField(timeframe);
+  return (candle as any)[rocField] ?? 0;
 }
 
 // Momentum Breakout Strategy (Basic)
@@ -33,16 +54,16 @@ export function momentumBreakoutStrategy(
   const minVolMult = params.minVolMult || 3;
   const maxSpreadBps = params.maxSpreadBps || 10;
   const leverage = params.leverage || 1;
-  const startingCapital = params.starting_capital || 10000;
-  
+  const timeframe = state.timeframe || '5m'; // Default to 5m for backward compatibility
+
   // Check if we already have a position for this symbol
   const existingPosition = state.positions.find(p => p.symbol === state.symbol && p.status === 'open');
-  
+
   if (existingPosition) {
-    // Check exit conditions
+    // Check exit conditions - use 1m ROC for exit signals (faster reaction)
     const momentumLost = (candle.roc_1m ?? 0) < 0;
     const rsiOverbought = (candle.rsi_14 ?? 50) > 75;
-    
+
     if (momentumLost || rsiOverbought) {
       signals.push({
         symbol: state.symbol,
@@ -54,21 +75,21 @@ export function momentumBreakoutStrategy(
       });
     }
   } else {
-    // Check entry conditions
-    const roc5m = candle.roc_5m ?? 0;
+    // Check entry conditions - use timeframe-appropriate ROC
+    const rocValue = getRocValue(candle, timeframe);
     const volMult = candle.vol_mult ?? 1;
     const spreadBps = candle.spread_bps ?? 0;
-    
+
     // ROC data is already in decimal format, use parameter directly
-    const momentumOk = roc5m >= minRoc5m;
+    const momentumOk = rocValue >= minRoc5m;
     const volumeOk = volMult >= minVolMult;
     const spreadOk = spreadBps <= maxSpreadBps;
-    
+
     if (momentumOk && volumeOk && spreadOk) {
       // Calculate position size (20% of capital)
       const riskAmount = state.currentCapital * 0.20;
       const size = riskAmount / candle.close;
-      
+
       signals.push({
         symbol: state.symbol,
         side: 'LONG',
@@ -77,7 +98,7 @@ export function momentumBreakoutStrategy(
         stopLoss: candle.close * 0.98,
         takeProfit: candle.close * 1.03,
         leverage,
-        reason: 'momentum_breakout'
+        reason: `momentum_breakout_${timeframe}`
       });
     }
   }
@@ -100,9 +121,10 @@ export function momentumBreakoutV2Strategy(
   const leverage = params.leverage || 1;
   const riskPct = 20; // Risk 20% of equity per trade
   const rsiExitLevel = 75;
-  
+  const timeframe = state.timeframe || '5m'; // Default to 5m for backward compatibility
+
   // Validate required data is available
-  const roc5m = candle.roc_5m ?? 0;
+  const rocValue = getRocValue(candle, timeframe);
   const volMult = candle.vol_mult ?? 1;
   const spreadBps = candle.spread_bps ?? 0;
   
@@ -126,12 +148,12 @@ export function momentumBreakoutV2Strategy(
   } else {
     // Check entry conditions
     // ROC data is already in decimal format, use parameter directly
-    const momentumOk = roc5m >= minRoc5m;
+    const momentumOk = rocValue >= minRoc5m;
     const volumeOk = volMult >= minVolMult;
     const spreadOk = spreadBps <= maxSpreadBps;
-    
+
     if (momentumOk && volumeOk && spreadOk) {
-      console.log(`[${state.symbol}] 🚀 ENTRY SIGNAL: roc5m=${(roc5m * 100).toFixed(2)}% (>=${minRoc5m}%), volMult=${volMult.toFixed(2)}x (>=${minVolMult}), spread=${spreadBps.toFixed(1)}bps (<=${maxSpreadBps})`);
+      console.log(`[${state.symbol}] 🚀 ENTRY SIGNAL: roc_${timeframe}=${(rocValue * 100).toFixed(2)}% (>=${minRoc5m}%), volMult=${volMult.toFixed(2)}x (>=${minVolMult}), spread=${spreadBps.toFixed(1)}bps (<=${maxSpreadBps})`);
       
       // Calculate position size based on risk percentage
       const riskAmount = state.currentCapital * (riskPct / 100);
@@ -146,7 +168,7 @@ export function momentumBreakoutV2Strategy(
         stopLoss: candle.close * 0.98, // 2% stop loss
         takeProfit: candle.close * 1.03, // 3% take profit
         leverage,
-        reason: 'momentum_breakout_v2'
+        reason: `momentum_breakout_v2_${timeframe}`
       });
     }
   }

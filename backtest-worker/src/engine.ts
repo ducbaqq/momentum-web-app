@@ -37,7 +37,7 @@ export async function runOneSymbol(run: RunRow, symbol: string) {
   
   try {
     // Try basic data first since it's most reliable
-    candles = await loadCandlesWithFeatures(symbol, run.start_ts, run.end_ts);
+    candles = await loadCandlesWithFeatures(symbol, run.start_ts, run.end_ts, run.timeframe);
     exchangeSpecs = undefined; // Will use defaults
     usingProfessionalData = false;
     console.log(`Successfully loaded basic data for ${symbol}: ${candles.length} candles`);
@@ -189,10 +189,9 @@ export async function runOneSymbol(run: RunRow, symbol: string) {
       break;
     }
     case 'regime_filtered_momentum': {
-      // Convert 1m data to 15m for the strategy
-      const timeframe = '15m';
-      const aggregatedCandles = aggregateCandles(candles, timeframe);
-      console.log(`Aggregated ${candles.length} 1m candles to ${aggregatedCandles.length} ${timeframe} candles for ${symbol}`);
+      // Use the timeframe specified in the run (no need to aggregate since data is already at correct timeframe)
+      const timeframe = run.timeframe;
+      console.log(`Using ${candles.length} ${timeframe} candles for ${symbol} regime strategy`);
       
       // Run multi-symbol engine with single symbol for advanced features
       const config = {
@@ -281,7 +280,7 @@ export async function runOneSymbol(run: RunRow, symbol: string) {
       };
       
       const enhancedResult = await basicEngine.runBacktest(
-        aggregatedCandles,
+        candles,
         simpleRegimeStrategy,
         {
           runId: run.run_id,

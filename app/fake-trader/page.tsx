@@ -601,13 +601,17 @@ export default function FakeTraderPage() {
                 value={formData.timeframe}
                 onChange={(e) => setFormData(prev => ({ ...prev, timeframe: e.target.value }))}
               >
-                <option value="15m">15 Minutes (Recommended)</option>
+                <option value="1m">1 Minute (Fastest signals)</option>
                 <option value="5m">5 Minutes</option>
+                <option value="15m">15 Minutes (Recommended)</option>
                 <option value="30m">30 Minutes</option>
                 <option value="1h">1 Hour</option>
               </select>
               <p className="text-xs text-sub mt-1">
-                Fake trader runs every 15 minutes, so 15m timeframe is recommended
+                {formData.timeframe === '1m'
+                  ? 'Fastest signals but more noise and frequent trading'
+                  : 'Fake trader runs every 15 minutes, so 15m timeframe is recommended'
+                }
               </p>
             </div>
 
