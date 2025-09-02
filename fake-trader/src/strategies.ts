@@ -52,7 +52,7 @@ export function momentumBreakoutV2Strategy(
   const signals: TradeSignal[] = [];
   
   // Get required parameters
-  const minRoc5m = params.minRoc5m || 1.2;
+  const minRocThreshold = params.minRoc5m || 1.2; // Used for all timeframes (rename in future)
   const minVolMult = params.minVolMult || 3;
   const maxSpreadBps = params.maxSpreadBps || 10;
   const leverage = params.leverage || 1;
@@ -85,12 +85,12 @@ export function momentumBreakoutV2Strategy(
   } else {
     // Check entry conditions
     // ROC data is already in decimal format, use parameter directly
-    const momentumOk = rocValue >= minRoc5m;
+    const momentumOk = rocValue >= minRocThreshold;
     const volumeOk = volMult >= minVolMult;
     const spreadOk = spreadBps <= maxSpreadBps;
 
     if (momentumOk && volumeOk && spreadOk) {
-      console.log(`[${state.symbol}] 🚀 ENTRY SIGNAL: roc_${timeframe}=${(rocValue * 100).toFixed(2)}% (>=${minRoc5m}%), volMult=${volMult.toFixed(2)}x (>=${minVolMult}), spread=${spreadBps.toFixed(1)}bps (<=${maxSpreadBps})`);
+      console.log(`[${state.symbol}] 🚀 ENTRY SIGNAL: roc_${timeframe}=${(rocValue * 100).toFixed(2)}% (>=${minRocThreshold}%), volMult=${volMult.toFixed(2)}x (>=${minVolMult}), spread=${spreadBps.toFixed(1)}bps (<=${maxSpreadBps})`);
       
       // Calculate position size based on risk percentage
       const riskAmount = state.currentCapital * (riskPct / 100);
