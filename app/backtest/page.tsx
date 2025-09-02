@@ -717,10 +717,7 @@ export default function BacktestPage() {
                 <option value="1d">1 Day</option>
               </select>
               <p className="text-xs text-sub mt-1">
-                {formData.strategy === 'regime_filtered_momentum' 
-                  ? 'Regime strategy works best with 15m timeframe'
-                  : 'Higher timeframes reduce noise but have fewer signals'
-                }
+                Higher timeframes reduce noise but have fewer signals
               </p>
             </div>
 
