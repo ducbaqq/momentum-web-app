@@ -65,41 +65,15 @@ export default function BacktestPage() {
     startDate: '',
     endDate: '',
     selectedSymbols: [] as string[],
-    strategy: 'momentum_breakout_v2',
     timeframe: '1m',
     
     // Capital settings
     startingCapital: 1000,
     
-    // Basic Strategy parameters (momentum_breakout_v2)
+    // Momentum Breakout V2 Strategy parameters
     minRoc5m: 0.5,
     minVolMult: 2,
     maxSpreadBps: 8,
-    
-    // Regime Filter (regime_filtered_momentum)
-    emaLength: 200,
-    rocPositive: true,
-    
-    // Entry Trigger (regime_filtered_momentum) 
-    minVolMult15m: 3.0,
-    minRoc15m: 0.6,
-    bbTrigger: true,
-    
-    // Risk Management
-    riskPerTrade: 0.3,
-    atrPeriod: 14,
-    atrMultiplier: 2.0,
-    partialTakeLevel: 1.2,
-    partialTakePercent: 50,
-    trailAfterPartial: true,
-    
-    // Guards
-    minBookImbalance: 1.2,
-    avoidFundingMinute: true,
-    killSwitchPercent: 2.0,
-    
-    // Position Management
-    maxConcurrentPositions: 3,
     
     // Execution parameters
     feeBps: 4,
@@ -248,51 +222,12 @@ export default function BacktestPage() {
       errors.startingCapital = 'Starting capital cannot exceed $10,000,000';
     }
 
-    // Validate basic strategy parameters
-    if (formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') {
-      if (formData.minRoc5m <= 0) {
-        errors.minRoc5m = 'Min ROC 5m must be greater than 0';
-      }
-      if (formData.minVolMult <= 0) {
-        errors.minVolMult = 'Min Vol Multiplier must be greater than 0';
-      }
+    // Validate momentum_breakout_v2 strategy parameters
+    if (formData.minRoc5m <= 0) {
+      errors.minRoc5m = 'Min ROC 5m must be greater than 0';
     }
-
-    // Validate regime filter parameters
-    if (formData.strategy === 'regime_filtered_momentum') {
-      if (formData.emaLength <= 0) {
-        errors.emaLength = 'EMA Length must be greater than 0';
-      }
-      if (formData.minVolMult15m <= 0) {
-        errors.minVolMult15m = 'Min Vol Multiplier 15m must be greater than 0';
-      }
-      if (formData.minRoc15m <= 0) {
-        errors.minRoc15m = 'Min ROC 15m must be greater than 0';
-      }
-      if (formData.riskPerTrade <= 0 || formData.riskPerTrade > 10) {
-        errors.riskPerTrade = 'Risk per trade must be between 0.1% and 10%';
-      }
-      if (formData.atrPeriod <= 0) {
-        errors.atrPeriod = 'ATR Period must be greater than 0';
-      }
-      if (formData.atrMultiplier <= 0) {
-        errors.atrMultiplier = 'ATR Multiplier must be greater than 0';
-      }
-      if (formData.partialTakeLevel <= 1) {
-        errors.partialTakeLevel = 'Partial Take Level must be greater than 1';
-      }
-      if (formData.partialTakePercent <= 0 || formData.partialTakePercent >= 100) {
-        errors.partialTakePercent = 'Partial Take Percent must be between 1% and 99%';
-      }
-      if (formData.minBookImbalance <= 0) {
-        errors.minBookImbalance = 'Min Book Imbalance must be greater than 0';
-      }
-      if (formData.killSwitchPercent <= 0 || formData.killSwitchPercent > 50) {
-        errors.killSwitchPercent = 'Kill Switch must be between 0.1% and 50%';
-      }
-      if (formData.maxConcurrentPositions <= 0) {
-        errors.maxConcurrentPositions = 'Max Concurrent Positions must be greater than 0';
-      }
+    if (formData.minVolMult <= 0) {
+      errors.minVolMult = 'Min Vol Multiplier must be greater than 0';
     }
 
     // Validate common parameters
@@ -381,50 +316,16 @@ export default function BacktestPage() {
 
     setLoading(true);
     try {
-      // Build strategy-specific parameters
+      // Build momentum_breakout_v2 strategy parameters
       let strategyParams: any = {
         maxSpreadBps: formData.maxSpreadBps,
         starting_capital: formData.startingCapital,
         feeBps: formData.feeBps,
         slippageBps: formData.slippageBps,
-        leverage: formData.leverage
+        leverage: formData.leverage,
+        minRoc5m: formData.minRoc5m,
+        minVolMult: formData.minVolMult
       };
-
-      if (formData.strategy === 'momentum_breakout' || formData.strategy === 'momentum_breakout_v2') {
-        strategyParams = {
-          ...strategyParams,
-          minRoc5m: formData.minRoc5m,
-          minVolMult: formData.minVolMult
-        };
-      } else if (formData.strategy === 'regime_filtered_momentum') {
-        strategyParams = {
-          ...strategyParams,
-          // Regime Filter
-          emaLength: formData.emaLength,
-          rocPositive: formData.rocPositive,
-          
-          // Entry Trigger
-          minVolMult15m: formData.minVolMult15m,
-          minRoc15m: formData.minRoc15m / 100, // Convert percentage to decimal
-          bbTrigger: formData.bbTrigger,
-          
-          // Risk Management
-          riskPerTrade: formData.riskPerTrade / 100, // Convert percentage to decimal
-          atrPeriod: formData.atrPeriod,
-          atrMultiplier: formData.atrMultiplier,
-          partialTakeLevel: formData.partialTakeLevel,
-          partialTakePercent: formData.partialTakePercent / 100, // Convert percentage to decimal
-          trailAfterPartial: formData.trailAfterPartial,
-          
-          // Guards
-          minBookImbalance: formData.minBookImbalance,
-          avoidFundingMinute: formData.avoidFundingMinute,
-          killSwitchPercent: formData.killSwitchPercent / 100, // Convert percentage to decimal
-          
-          // Position Management
-          maxConcurrentPositions: formData.maxConcurrentPositions
-        };
-      }
 
       const payload = {
         name: formData.name,
@@ -432,7 +333,7 @@ export default function BacktestPage() {
         end_ts: localToUtc(formData.endDate), // Convert local time to UTC for API
         symbols: formData.selectedSymbols,
         timeframe: formData.timeframe,
-        strategy_name: formData.strategy,
+        strategy_name: 'momentum_breakout_v2',
         strategy_version: '1.0',
         starting_capital: formData.startingCapital,
         params: strategyParams,
@@ -797,18 +698,7 @@ export default function BacktestPage() {
               )}
             </div>
 
-            {/* Strategy Selection */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Strategy</label>
-              <select
-                className="w-full bg-bg border border-border rounded px-3 py-2"
-                value={formData.strategy}
-                onChange={(e) => setFormData(prev => ({ ...prev, strategy: e.target.value }))}
-              >
-                <option value="momentum_breakout_v2">Momentum Breakout V2 (Professional)</option>
-                <option value="regime_filtered_momentum">Regime Filtered Momentum (Advanced)</option>
-              </select>
-            </div>
+
 
             {/* Timeframe Selection */}
             <div>
@@ -836,374 +726,54 @@ export default function BacktestPage() {
 
             {/* Strategy Parameters */}
             <div className="border-t border-border pt-4">
-              <h4 className="font-medium mb-3">Strategy Parameters</h4>
-              
-              {/* Basic Momentum Strategy Parameters */}
-              {formData.strategy === 'momentum_breakout_v2' && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-sub mb-1">Min ROC 5m (%) *</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                          validationErrors.minRoc5m ? 'border-red-500' : 'border-border'
-                        }`}
-                        value={formData.minRoc5m}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, minRoc5m: parseFloat(e.target.value) || 0 }));
-                          if (validationErrors.minRoc5m) {
-                            setValidationErrors(prev => ({ ...prev, minRoc5m: '' }));
-                          }
-                        }}
-                      />
-                      {validationErrors.minRoc5m && (
-                        <p className="text-red-500 text-xs mt-1">{validationErrors.minRoc5m}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-xs text-sub mb-1">Min Vol Multiplier *</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                          validationErrors.minVolMult ? 'border-red-500' : 'border-border'
-                        }`}
-                        value={formData.minVolMult}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, minVolMult: parseFloat(e.target.value) || 0 }));
-                          if (validationErrors.minVolMult) {
-                            setValidationErrors(prev => ({ ...prev, minVolMult: '' }));
-                          }
-                        }}
-                      />
-                      {validationErrors.minVolMult && (
-                        <p className="text-red-500 text-xs mt-1">{validationErrors.minVolMult}</p>
-                      )}
-                    </div>
+              <h4 className="font-medium mb-3">Momentum Breakout V2 Parameters</h4>
+
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-sub mb-1">Min ROC 5m (%) *</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                        validationErrors.minRoc5m ? 'border-red-500' : 'border-border'
+                      }`}
+                      value={formData.minRoc5m}
+                      onChange={(e) => {
+                        setFormData(prev => ({ ...prev, minRoc5m: parseFloat(e.target.value) || 0 }));
+                        if (validationErrors.minRoc5m) {
+                          setValidationErrors(prev => ({ ...prev, minRoc5m: '' }));
+                        }
+                      }}
+                    />
+                    {validationErrors.minRoc5m && (
+                      <p className="text-red-500 text-xs mt-1">{validationErrors.minRoc5m}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-sub mb-1">Min Vol Multiplier *</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                        validationErrors.minVolMult ? 'border-red-500' : 'border-border'
+                      }`}
+                      value={formData.minVolMult}
+                      onChange={(e) => {
+                        setFormData(prev => ({ ...prev, minVolMult: parseFloat(e.target.value) || 0 }));
+                        if (validationErrors.minVolMult) {
+                          setValidationErrors(prev => ({ ...prev, minVolMult: '' }));
+                        }
+                      }}
+                    />
+                    {validationErrors.minVolMult && (
+                      <p className="text-red-500 text-xs mt-1">{validationErrors.minVolMult}</p>
+                    )}
                   </div>
                 </div>
-              )}
-
-              {/* Regime Filtered Momentum Strategy Parameters */}
-              {formData.strategy === 'regime_filtered_momentum' && (
-                <div className="space-y-4">
-                  {/* Regime Filter Section */}
-                  <div className="bg-blue-500/5 border border-blue-500/20 rounded p-3">
-                    <h5 className="text-sm font-medium mb-2 text-blue-400">📊 Regime Filter</h5>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-sub mb-1">EMA Length *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.emaLength ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.emaLength}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, emaLength: parseInt(e.target.value) || 200 }));
-                            if (validationErrors.emaLength) {
-                              setValidationErrors(prev => ({ ...prev, emaLength: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.emaLength && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.emaLength}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center">
-                        <label className="flex items-center text-xs cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formData.rocPositive}
-                            onChange={(e) => setFormData(prev => ({ ...prev, rocPositive: e.target.checked }))}
-                            className="mr-2"
-                          />
-                          Require Positive ROC 1h
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Entry Trigger Section */}
-                  <div className="bg-green-500/5 border border-green-500/20 rounded p-3">
-                    <h5 className="text-sm font-medium mb-2 text-green-400">🎯 Entry Trigger (15m)</h5>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs text-sub mb-1">Min Vol Mult 15m *</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.minVolMult15m ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.minVolMult15m}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, minVolMult15m: parseFloat(e.target.value) || 0 }));
-                            if (validationErrors.minVolMult15m) {
-                              setValidationErrors(prev => ({ ...prev, minVolMult15m: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.minVolMult15m && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.minVolMult15m}</p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="block text-xs text-sub mb-1">Min ROC 15m (%) *</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.minRoc15m ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.minRoc15m}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, minRoc15m: parseFloat(e.target.value) || 0 }));
-                            if (validationErrors.minRoc15m) {
-                              setValidationErrors(prev => ({ ...prev, minRoc15m: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.minRoc15m && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.minRoc15m}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center">
-                        <label className="flex items-center text-xs cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formData.bbTrigger}
-                            onChange={(e) => setFormData(prev => ({ ...prev, bbTrigger: e.target.checked }))}
-                            className="mr-2"
-                          />
-                          BB Upper Breakout
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Risk Management Section */}
-                  <div className="bg-orange-500/5 border border-orange-500/20 rounded p-3">
-                    <h5 className="text-sm font-medium mb-2 text-orange-400">⚠️ Risk Management</h5>
-                    <div className="grid grid-cols-3 gap-3 mb-3">
-                      <div>
-                        <label className="block text-xs text-sub mb-1">Risk Per Trade (%) *</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0.1"
-                          max="10"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.riskPerTrade ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.riskPerTrade}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, riskPerTrade: parseFloat(e.target.value) || 0 }));
-                            if (validationErrors.riskPerTrade) {
-                              setValidationErrors(prev => ({ ...prev, riskPerTrade: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.riskPerTrade && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.riskPerTrade}</p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="block text-xs text-sub mb-1">ATR Period *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.atrPeriod ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.atrPeriod}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, atrPeriod: parseInt(e.target.value) || 0 }));
-                            if (validationErrors.atrPeriod) {
-                              setValidationErrors(prev => ({ ...prev, atrPeriod: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.atrPeriod && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.atrPeriod}</p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="block text-xs text-sub mb-1">ATR Multiplier *</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0.1"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.atrMultiplier ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.atrMultiplier}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, atrMultiplier: parseFloat(e.target.value) || 0 }));
-                            if (validationErrors.atrMultiplier) {
-                              setValidationErrors(prev => ({ ...prev, atrMultiplier: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.atrMultiplier && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.atrMultiplier}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs text-sub mb-1">Partial Take Level (R) *</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="1.1"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.partialTakeLevel ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.partialTakeLevel}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, partialTakeLevel: parseFloat(e.target.value) || 0 }));
-                            if (validationErrors.partialTakeLevel) {
-                              setValidationErrors(prev => ({ ...prev, partialTakeLevel: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.partialTakeLevel && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.partialTakeLevel}</p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="block text-xs text-sub mb-1">Partial Take % *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="99"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.partialTakePercent ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.partialTakePercent}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, partialTakePercent: parseInt(e.target.value) || 0 }));
-                            if (validationErrors.partialTakePercent) {
-                              setValidationErrors(prev => ({ ...prev, partialTakePercent: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.partialTakePercent && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.partialTakePercent}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center">
-                        <label className="flex items-center text-xs cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formData.trailAfterPartial}
-                            onChange={(e) => setFormData(prev => ({ ...prev, trailAfterPartial: e.target.checked }))}
-                            className="mr-2"
-                          />
-                          Trail After Partial
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Guard Conditions Section */}
-                  <div className="bg-red-500/5 border border-red-500/20 rounded p-3">
-                    <h5 className="text-sm font-medium mb-2 text-red-400">🛡️ Guard Conditions</h5>
-                    <div className="grid grid-cols-3 gap-3 mb-3">
-                      <div>
-                        <label className="block text-xs text-sub mb-1">Min Book Imbalance *</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0.1"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.minBookImbalance ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.minBookImbalance}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, minBookImbalance: parseFloat(e.target.value) || 0 }));
-                            if (validationErrors.minBookImbalance) {
-                              setValidationErrors(prev => ({ ...prev, minBookImbalance: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.minBookImbalance && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.minBookImbalance}</p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="block text-xs text-sub mb-1">Kill Switch (%) *</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0.1"
-                          max="50"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.killSwitchPercent ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.killSwitchPercent}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, killSwitchPercent: parseFloat(e.target.value) || 0 }));
-                            if (validationErrors.killSwitchPercent) {
-                              setValidationErrors(prev => ({ ...prev, killSwitchPercent: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.killSwitchPercent && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.killSwitchPercent}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center">
-                        <label className="flex items-center text-xs cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formData.avoidFundingMinute}
-                            onChange={(e) => setFormData(prev => ({ ...prev, avoidFundingMinute: e.target.checked }))}
-                            className="mr-2"
-                          />
-                          Avoid Funding Minutes
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Position Management Section */}
-                  <div className="bg-purple-500/5 border border-purple-500/20 rounded p-3">
-                    <h5 className="text-sm font-medium mb-2 text-purple-400">📊 Position Management</h5>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-sub mb-1">Max Concurrent Positions *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="10"
-                          className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                            validationErrors.maxConcurrentPositions ? 'border-red-500' : 'border-border'
-                          }`}
-                          value={formData.maxConcurrentPositions}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, maxConcurrentPositions: parseInt(e.target.value) || 0 }));
-                            if (validationErrors.maxConcurrentPositions) {
-                              setValidationErrors(prev => ({ ...prev, maxConcurrentPositions: '' }));
-                            }
-                          }}
-                        />
-                        {validationErrors.maxConcurrentPositions && (
-                          <p className="text-red-500 text-xs mt-1">{validationErrors.maxConcurrentPositions}</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              </div>
 
               {/* Common Parameters */}
               <div className="mt-4">

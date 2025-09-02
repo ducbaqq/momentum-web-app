@@ -39,7 +39,6 @@ export default function FakeTraderPage() {
   const [formData, setFormData] = useState({
     name: '',
     selectedSymbols: [] as string[],
-    strategy: 'momentum_breakout_v2',
     timeframe: '15m',
     
     // Capital settings
@@ -134,48 +133,12 @@ export default function FakeTraderPage() {
       errors.startingCapital = 'Starting capital cannot exceed $10,000,000';
     }
 
-    // Validate basic strategy parameters
-    if (formData.strategy === 'momentum_breakout_v2') {
-      if (formData.minRoc5m <= 0) {
-        errors.minRoc5m = 'Min ROC 5m must be greater than 0';
-      }
-      if (formData.minVolMult <= 0) {
-        errors.minVolMult = 'Min Vol Multiplier must be greater than 0';
-      }
+    // Validate momentum_breakout_v2 strategy parameters
+    if (formData.minRoc5m <= 0) {
+      errors.minRoc5m = 'Min ROC 5m must be greater than 0';
     }
-
-    // Validate regime filter parameters
-    if (formData.strategy === 'regime_filtered_momentum') {
-      if (formData.emaLength <= 0) {
-        errors.emaLength = 'EMA Length must be greater than 0';
-      }
-      if (formData.minVolMult15m <= 0) {
-        errors.minVolMult15m = 'Min Vol Multiplier 15m must be greater than 0';
-      }
-      if (formData.minRoc15m <= 0) {
-        errors.minRoc15m = 'Min ROC 15m must be greater than 0';
-      }
-      if (formData.riskPerTrade <= 0 || formData.riskPerTrade > 10) {
-        errors.riskPerTrade = 'Risk per trade must be between 0.1% and 10%';
-      }
-      if (formData.atrPeriod <= 0) {
-        errors.atrPeriod = 'ATR Period must be greater than 0';
-      }
-      if (formData.atrMultiplier <= 0) {
-        errors.atrMultiplier = 'ATR Multiplier must be greater than 0';
-      }
-      if (formData.partialTakeLevel <= 1) {
-        errors.partialTakeLevel = 'Partial Take Level must be greater than 1';
-      }
-      if (formData.partialTakePercent <= 0 || formData.partialTakePercent >= 100) {
-        errors.partialTakePercent = 'Partial Take Percent must be between 1% and 99%';
-      }
-      if (formData.minBookImbalance <= 0) {
-        errors.minBookImbalance = 'Min Book Imbalance must be greater than 0';
-      }
-      if (formData.killSwitchPercent <= 0 || formData.killSwitchPercent > 50) {
-        errors.killSwitchPercent = 'Kill Switch must be between 0.1% and 50%';
-      }
+    if (formData.minVolMult <= 0) {
+      errors.minVolMult = 'Min Vol Multiplier must be greater than 0';
     }
 
     // Validate max concurrent positions
@@ -215,53 +178,22 @@ export default function FakeTraderPage() {
 
     setLoading(true);
     try {
-      // Build strategy-specific parameters
+      // Build momentum_breakout_v2 strategy parameters
       let strategyParams: any = {
         maxSpreadBps: formData.maxSpreadBps,
         starting_capital: formData.startingCapital,
         feeBps: formData.feeBps,
         slippageBps: formData.slippageBps,
-        leverage: formData.leverage
+        leverage: formData.leverage,
+        minRoc5m: formData.minRoc5m,
+        minVolMult: formData.minVolMult
       };
-
-      if (formData.strategy === 'momentum_breakout_v2') {
-        strategyParams = {
-          ...strategyParams,
-          minRoc5m: formData.minRoc5m,
-          minVolMult: formData.minVolMult
-        };
-      } else if (formData.strategy === 'regime_filtered_momentum') {
-        strategyParams = {
-          ...strategyParams,
-          // Regime Filter
-          emaLength: formData.emaLength,
-          rocPositive: formData.rocPositive,
-          
-          // Entry Trigger
-          minVolMult15m: formData.minVolMult15m,
-          minRoc15m: formData.minRoc15m / 100, // Convert percentage to decimal
-          bbTrigger: formData.bbTrigger,
-          
-          // Risk Management
-          riskPerTrade: formData.riskPerTrade / 100, // Convert percentage to decimal
-          atrPeriod: formData.atrPeriod,
-          atrMultiplier: formData.atrMultiplier,
-          partialTakeLevel: formData.partialTakeLevel,
-          partialTakePercent: formData.partialTakePercent / 100, // Convert percentage to decimal
-          trailAfterPartial: formData.trailAfterPartial,
-          
-          // Guards
-          minBookImbalance: formData.minBookImbalance,
-          avoidFundingMinute: formData.avoidFundingMinute,
-          killSwitchPercent: formData.killSwitchPercent / 100, // Convert percentage to decimal
-        };
-      }
 
       const payload = {
         name: formData.name,
         symbols: formData.selectedSymbols,
         timeframe: formData.timeframe,
-        strategy_name: formData.strategy,
+        strategy_name: 'momentum_breakout_v2',
         strategy_version: '1.0',
         starting_capital: formData.startingCapital,
         max_concurrent_positions: formData.maxConcurrentPositions,
@@ -580,18 +512,7 @@ export default function FakeTraderPage() {
               )}
             </div>
 
-            {/* Strategy Selection */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Strategy</label>
-              <select
-                className="w-full bg-bg border border-border rounded px-3 py-2"
-                value={formData.strategy}
-                onChange={(e) => setFormData(prev => ({ ...prev, strategy: e.target.value }))}
-              >
-                <option value="momentum_breakout_v2">Momentum Breakout V2 (Professional)</option>
-                <option value="regime_filtered_momentum">Regime Filtered Momentum (Advanced)</option>
-              </select>
-            </div>
+
 
             {/* Timeframe Selection */}
             <div>
@@ -615,59 +536,56 @@ export default function FakeTraderPage() {
               </p>
             </div>
 
-            {/* Strategy Parameters - Same as backtest form but condensed */}
+            {/* Strategy Parameters */}
             <div className="border-t border-border pt-4">
-              <h4 className="font-medium mb-3">Strategy Parameters</h4>
-              
-              {/* Basic Momentum Strategy Parameters */}
-              {formData.strategy === 'momentum_breakout_v2' && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-sub mb-1">Min ROC 5m (%) *</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                          validationErrors.minRoc5m ? 'border-red-500' : 'border-border'
-                        }`}
-                        value={formData.minRoc5m}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, minRoc5m: parseFloat(e.target.value) || 0 }));
-                          if (validationErrors.minRoc5m) {
-                            setValidationErrors(prev => ({ ...prev, minRoc5m: '' }));
-                          }
-                        }}
-                      />
-                      {validationErrors.minRoc5m && (
-                        <p className="text-red-500 text-xs mt-1">{validationErrors.minRoc5m}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-xs text-sub mb-1">Min Vol Multiplier *</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                          validationErrors.minVolMult ? 'border-red-500' : 'border-border'
-                        }`}
-                        value={formData.minVolMult}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, minVolMult: parseFloat(e.target.value) || 0 }));
-                          if (validationErrors.minVolMult) {
-                            setValidationErrors(prev => ({ ...prev, minVolMult: '' }));
-                          }
-                        }}
-                      />
-                      {validationErrors.minVolMult && (
-                        <p className="text-red-500 text-xs mt-1">{validationErrors.minVolMult}</p>
-                      )}
-                    </div>
+              <h4 className="font-medium mb-3">Momentum Breakout V2 Parameters</h4>
+
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-sub mb-1">Min ROC 5m (%) *</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                        validationErrors.minRoc5m ? 'border-red-500' : 'border-border'
+                      }`}
+                      value={formData.minRoc5m}
+                      onChange={(e) => {
+                        setFormData(prev => ({ ...prev, minRoc5m: parseFloat(e.target.value) || 0 }));
+                        if (validationErrors.minRoc5m) {
+                          setValidationErrors(prev => ({ ...prev, minRoc5m: '' }));
+                        }
+                      }}
+                    />
+                    {validationErrors.minRoc5m && (
+                      <p className="text-red-500 text-xs mt-1">{validationErrors.minRoc5m}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-sub mb-1">Min Vol Multiplier *</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
+                        validationErrors.minVolMult ? 'border-red-500' : 'border-border'
+                      }`}
+                      value={formData.minVolMult}
+                      onChange={(e) => {
+                        setFormData(prev => ({ ...prev, minVolMult: parseFloat(e.target.value) || 0 }));
+                        if (validationErrors.minVolMult) {
+                          setValidationErrors(prev => ({ ...prev, minVolMult: '' }));
+                        }
+                      }}
+                    />
+                    {validationErrors.minVolMult && (
+                      <p className="text-red-500 text-xs mt-1">{validationErrors.minVolMult}</p>
+                    )}
                   </div>
                 </div>
-              )}
+              </div>
 
               {/* Common Parameters */}
               <div className="mt-4">

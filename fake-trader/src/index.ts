@@ -203,8 +203,8 @@ class FakeTrader {
     // Get recent candles for all symbols (look back 60 minutes, but aggregated to timeframe)
     const recentCandles = await getRecentCandles(run.symbols, 60, run.timeframe);
     
-    // Get strategy function
-    const strategy = getStrategy(run.strategy_name);
+    // Get momentum_breakout_v2 strategy function
+    const strategy = getStrategy('momentum_breakout_v2');
     
     // Process each symbol's recent candles for entry signals
     for (const symbol of run.symbols) {
