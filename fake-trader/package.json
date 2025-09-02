@@ -12,7 +12,8 @@
   "dependencies": {
     "pg": "^8.11.3",
     "dotenv": "^16.4.5",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "trading-shared": "file:../shared"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",

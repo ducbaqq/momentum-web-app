@@ -17,7 +17,8 @@
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",
     "binance-api-node": "^0.12.0",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "trading-shared": "file:../shared"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",

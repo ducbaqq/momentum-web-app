@@ -1,25 +1,10 @@
-import { Pool } from 'pg';
+import { createPool, testConnection as sharedTestConnection, getRecentCandles as sharedGetRecentCandles, getLivePrices as sharedGetLivePrices } from 'trading-shared';
 // Initialize database connection
-export const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
-});
-// Test connection
-export async function testConnection() {
-    try {
-        const client = await pool.connect();
-        await client.query('SELECT 1');
-        client.release();
-        console.log('✓ Database connected successfully');
-    }
-    catch (error) {
-        console.error('✗ Database connection failed:', error);
-        throw error;
-    }
-}
+export const pool = createPool();
+// Re-export shared functions
+export const testConnection = () => sharedTestConnection(pool);
+export const getRecentCandles = (symbols, lookbackMinutes) => sharedGetRecentCandles(pool, symbols, lookbackMinutes);
+export const getLivePrices = (symbols) => sharedGetLivePrices(pool, symbols);
 // Get active trading runs (including winding down runs)
 export async function getActiveRuns() {
     const query = `
@@ -39,133 +24,122 @@ export async function getActiveRuns() {
         seed: row.seed ? Number(row.seed) : undefined,
     }));
 }
-// Get live ticker prices (most recent 1m candle for position management)
-export async function getLivePrices(symbols) {
-    const query = `
-    SELECT DISTINCT ON (symbol) 
-      symbol,
-      close::double precision AS close
-    FROM ohlcv_1m 
-    WHERE symbol = ANY($1)
-    AND ts >= NOW() - INTERVAL '10 minutes'  -- Look back 10 minutes to find latest
-    ORDER BY symbol, ts DESC
-  `;
-    const result = await pool.query(query, [symbols]);
-    const prices = {};
-    for (const row of result.rows) {
-        prices[row.symbol] = Number(row.close);
+// Helper function to get the most recent completed 15-minute period
+function getMostRecentCompleted15mPeriod() {
+    const now = new Date();
+    const currentMinutes = now.getUTCMinutes();
+    // Calculate minutes into the current 15-minute period
+    const minutesInto15mPeriod = currentMinutes % 15;
+    // Always go back to the most recent COMPLETED period
+    // If we're less than 2 minutes into current period, go back 2 periods (to be safe for data lag)
+    // Otherwise go back 1 period (the one that just completed)
+    let targetMinutes;
+    if (minutesInto15mPeriod < 2) {
+        // Go back to previous completed period (2 periods back)
+        targetMinutes = currentMinutes - minutesInto15mPeriod - 30;
     }
-    return prices;
+    else {
+        // Go back to the period that just completed (1 period back)
+        targetMinutes = currentMinutes - minutesInto15mPeriod - 15;
+    }
+    // Handle negative minutes (wrap to previous hour)
+    if (targetMinutes < 0) {
+        targetMinutes += 60;
+        const targetPeriodStart = new Date(now);
+        targetPeriodStart.setUTCHours(targetPeriodStart.getUTCHours() - 1);
+        targetPeriodStart.setUTCMinutes(targetMinutes, 0, 0);
+        return targetPeriodStart;
+    }
+    // Calculate the start of the target 15-minute period
+    const targetPeriodStart = new Date(now);
+    targetPeriodStart.setUTCMinutes(targetMinutes, 0, 0);
+    return targetPeriodStart;
 }
-// Get completed 15m candle data for entry signals (using 1m data aggregated to 15m intervals)
-export async function getCompleted15mCandles(symbols, lastProcessedTime) {
-    // Enhanced version - aggregate from 1m candles and calculate basic indicators
+// Get completed 15m candle data for entry signals (using aggregated 1m data with pre-calculated features)
+export async function getCompleted15mCandles(symbols) {
+    // Calculate the target 15-minute period to fetch
+    const targetPeriod = getMostRecentCompleted15mPeriod();
+    const periodEnd = new Date(targetPeriod.getTime() + 15 * 60 * 1000); // Add 15 minutes
+    console.log(`🔍 [REAL TRADER] Fetching 15m candle for period: ${targetPeriod.toISOString()} to ${periodEnd.toISOString()}`);
+    // Use the same approach as backtest worker and fake trader - aggregate 1m OHLCV data with pre-calculated features
     const query = `
-    WITH raw_1m_data AS (
+    WITH aggregated_15m_candles AS (
       SELECT 
-        symbol,
-        ts,
-        open::double precision as open,
-        high::double precision as high,
-        low::double precision as low,
-        close::double precision as close,
-        volume::double precision as volume,
-        to_timestamp(floor(extract(epoch from ts) / (15*60)) * (15*60)) AT TIME ZONE 'UTC' as candle_start,
-        ROW_NUMBER() OVER (PARTITION BY symbol, to_timestamp(floor(extract(epoch from ts) / (15*60)) * (15*60)) ORDER BY ts ASC) as rn_asc,
-        ROW_NUMBER() OVER (PARTITION BY symbol, to_timestamp(floor(extract(epoch from ts) / (15*60)) * (15*60)) ORDER BY ts DESC) as rn_desc
-      FROM ohlcv_1m 
-      WHERE symbol = ANY($1)
-      AND ts <= NOW() - INTERVAL '15 minutes'  -- Only completed 15m periods
-      AND ts >= NOW() - INTERVAL '6 hours'     -- Look back 6 hours for more data
-    ),
-    aggregated_15m_candles AS (
-      SELECT 
-        symbol,
-        candle_start,
-        MAX(CASE WHEN rn_asc = 1 THEN open END) as open,
-        MAX(high) as high,
-        MIN(low) as low,
-        MAX(CASE WHEN rn_desc = 1 THEN close END) as close,
-        SUM(volume) as volume
-      FROM raw_1m_data
-      GROUP BY symbol, candle_start
+        o.symbol,
+        to_timestamp(floor(extract(epoch from o.ts) / (15*60)) * (15*60)) AT TIME ZONE 'UTC' as candle_start,
+        AVG(o.open::double precision) as open,
+        MAX(o.high::double precision) as high,
+        MIN(o.low::double precision) as low,
+        AVG(o.close::double precision) as close,
+        SUM(o.volume::double precision) as volume,
+        -- Aggregate features - use the latest values in each 15m period
+        AVG(COALESCE(f.roc_5m, 0)) as roc_5m,
+        AVG(COALESCE(f.vol_mult, 1)) as vol_mult,
+        AVG(COALESCE(f.roc_1m, 0)) as roc_1m,
+        AVG(COALESCE(f.roc_15m, 0)) as roc_15m,
+        AVG(COALESCE(f.roc_30m, 0)) as roc_30m,
+        AVG(COALESCE(f.roc_1h, 0)) as roc_1h,
+        AVG(COALESCE(f.roc_4h, 0)) as roc_4h,
+        AVG(COALESCE(f.rsi_14, 50)) as rsi_14,
+        AVG(COALESCE(f.ema_20, o.close::double precision)) as ema_20,
+        AVG(COALESCE(f.ema_50, o.close::double precision)) as ema_50,
+        AVG(COALESCE(f.bb_upper, o.close::double precision * 1.02)) as bb_upper,
+        AVG(COALESCE(f.bb_lower, o.close::double precision * 0.98)) as bb_lower,
+        AVG(COALESCE(f.spread_bps, 5)) as spread_bps,
+        COUNT(*) as minute_count
+      FROM ohlcv_1m o
+      LEFT JOIN features_1m f ON f.symbol = o.symbol AND f.ts = o.ts
+      WHERE o.symbol = ANY($1)
+        AND o.ts >= $2::timestamp 
+        AND o.ts < $3::timestamp
+      GROUP BY o.symbol, candle_start
       HAVING COUNT(*) >= 10  -- Ensure we have most of the 15m period data
-    ),
-    historical_candles AS (
-      SELECT 
-        symbol,
-        candle_start as ts,
-        open, high, low, close, volume,
-        LAG(close, 5) OVER (PARTITION BY symbol ORDER BY candle_start) as close_5_periods_ago,
-        LAG(volume, 20) OVER (PARTITION BY symbol ORDER BY candle_start) as volume_20_periods_ago,
-        AVG(volume) OVER (PARTITION BY symbol ORDER BY candle_start ROWS 20 PRECEDING) as vol_avg_20
-      FROM aggregated_15m_candles
-    ),
-    latest_15m_candles AS (
-      SELECT  
-        symbol,
-        ts,
-        open, high, low, close, volume,
-        close_5_periods_ago,
-        vol_avg_20,
-        -- Calculate basic indicators
-        CASE 
-          WHEN close_5_periods_ago > 0 THEN ((close / close_5_periods_ago - 1) * 100)
-          ELSE 0 
-        END as roc_5m,
-        CASE 
-          WHEN vol_avg_20 > 0 THEN (volume / vol_avg_20)
-          ELSE 1 
-        END as vol_mult,
-        ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) as rn
-      FROM historical_candles
-      WHERE ($2::timestamp IS NULL OR ts > $2::timestamp)
     )
     SELECT 
-      symbol, ts, open, high, low, close, volume, roc_5m, vol_mult, vol_avg_20
-    FROM latest_15m_candles
-    WHERE roc_5m IS NOT NULL  -- Only include candles where we can calculate indicators
-      AND rn = 1  -- Only get the most recent candle per symbol
-    ORDER BY symbol, ts DESC
+      symbol,
+      candle_start as ts,
+      open, high, low, close, volume,
+      roc_5m, vol_mult, roc_1m, roc_15m, roc_30m, roc_1h, roc_4h,
+      rsi_14, ema_20, ema_50, bb_upper, bb_lower, spread_bps,
+      minute_count
+    FROM aggregated_15m_candles
+    WHERE candle_start = $2::timestamp  -- Only get the target period
+    ORDER BY symbol
   `;
-    const result = await pool.query(query, [symbols, lastProcessedTime || null]);
-    console.log(`🔍 Query returned ${result.rows.length} rows`);
+    const result = await pool.query(query, [symbols, targetPeriod.toISOString(), periodEnd.toISOString()]);
+    console.log(`🔍 [REAL TRADER] Query returned ${result.rows.length} rows for target period ${targetPeriod.toISOString()}`);
     if (result.rows.length > 0) {
-        console.log(`🔍 Sample row:`, JSON.stringify(result.rows[0], null, 2));
+        console.log(`🔍 [REAL TRADER] Sample row:`, JSON.stringify(result.rows[0], null, 2));
     }
     const candles = {};
     for (const row of result.rows) {
-        // Only keep the most recent candle per symbol
-        if (!candles[row.symbol]) {
-            candles[row.symbol] = {
-                ts: row.ts,
-                open: Number(row.open),
-                high: Number(row.high),
-                low: Number(row.low),
-                close: Number(row.close),
-                volume: Number(row.volume),
-                // Basic calculated indicators
-                roc_5m: Number(row.roc_5m) || 0,
-                vol_mult: Number(row.vol_mult) || 1,
-                vol_avg_20: Number(row.vol_avg_20) || 0,
-                // Set reasonable defaults for missing indicators to prevent strategy failures
-                roc_1m: 0,
-                roc_15m: 0,
-                roc_30m: 0,
-                roc_1h: 0,
-                roc_4h: 0,
-                rsi_14: 50,
-                ema_20: Number(row.close),
-                ema_50: Number(row.close),
-                ema_200: Number(row.close),
-                macd: 0,
-                macd_signal: 0,
-                bb_upper: Number(row.close) * 1.02,
-                bb_lower: Number(row.close) * 0.98,
-                book_imb: 1.0,
-                spread_bps: 5, // Reasonable default spread
-            };
-        }
+        candles[row.symbol] = {
+            ts: row.ts,
+            open: Number(row.open),
+            high: Number(row.high),
+            low: Number(row.low),
+            close: Number(row.close),
+            volume: Number(row.volume),
+            // Use pre-calculated features from the features_1m table
+            roc_5m: Number(row.roc_5m) || 0,
+            vol_mult: Number(row.vol_mult) || 1,
+            roc_1m: Number(row.roc_1m) || 0,
+            roc_15m: Number(row.roc_15m) || 0,
+            roc_30m: Number(row.roc_30m) || 0,
+            roc_1h: Number(row.roc_1h) || 0,
+            roc_4h: Number(row.roc_4h) || 0,
+            rsi_14: Number(row.rsi_14) || 50,
+            ema_20: Number(row.ema_20) || Number(row.close),
+            ema_50: Number(row.ema_50) || Number(row.close),
+            // ema_200 removed - not in backtest interface
+            macd: 0, // Not available in current features
+            macd_signal: 0,
+            bb_upper: Number(row.bb_upper) || Number(row.close) * 1.02,
+            bb_lower: Number(row.bb_lower) || Number(row.close) * 0.98,
+            book_imb: 1.0,
+            spread_bps: Number(row.spread_bps) || 5,
+            vol_avg_20: Number(row.volume) || 0, // Use current volume as fallback
+        };
     }
     return candles;
 }

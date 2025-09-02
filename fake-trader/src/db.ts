@@ -1,27 +1,20 @@
-import { Pool } from 'pg';
-import type { FakeTradeRun, FakeTrade, FakePosition, FakeSignal, Candle } from './types.js';
+import { 
+  createPool,
+  testConnection as sharedTestConnection,
+  getRecentCandles as sharedGetRecentCandles,
+  getLivePrices as sharedGetLivePrices,
+  Candle
+} from 'trading-shared';
+import type { FakeTradeRun, FakeTrade, FakePosition, FakeSignal } from './types.js';
 
 // Initialize database connection
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-});
+export const pool = createPool();
 
-// Test connection
-export async function testConnection(): Promise<void> {
-  try {
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
-    console.log('✓ Database connected successfully');
-  } catch (error) {
-    console.error('✗ Database connection failed:', error);
-    throw error;
-  }
-}
+// Re-export shared functions
+export const testConnection = () => sharedTestConnection(pool);
+export const getRecentCandles = (symbols: string[], lookbackMinutes?: number) => 
+  sharedGetRecentCandles(pool, symbols, lookbackMinutes);
+export const getLivePrices = (symbols: string[]) => sharedGetLivePrices(pool, symbols);
 
 // Get active trading runs (including winding down runs)
 export async function getActiveRuns(): Promise<FakeTradeRun[]> {
@@ -41,285 +34,12 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
   }));
 }
 
-// Get live ticker prices (most recent 1m candle for position management)
-export async function getLivePrices(symbols: string[]): Promise<Record<string, number>> {
-  const query = `
-    SELECT DISTINCT ON (symbol) 
-      symbol,
-      close::double precision AS close
-    FROM ohlcv_1m 
-    WHERE symbol = ANY($1)
-    AND ts >= NOW() - INTERVAL '10 minutes'  -- Look back 10 minutes to find latest
-    ORDER BY symbol, ts DESC
-  `;
-  
-  const result = await pool.query(query, [symbols]);
-  
-  const prices: Record<string, number> = {};
-  for (const row of result.rows) {
-    prices[row.symbol] = Number(row.close);
-  }
-  
-  return prices;
-}
-
-// Helper function to get the most recent completed 15-minute period
-function getMostRecentCompleted15mPeriod(): Date {
-  const now = new Date();
-  const currentMinutes = now.getUTCMinutes();
-  
-  // Calculate minutes into the current 15-minute period
-  const minutesInto15mPeriod = currentMinutes % 15;
-  
-  // Always go back to the most recent COMPLETED period
-  // If we're less than 2 minutes into current period, go back 2 periods (to be safe for data lag)
-  // Otherwise go back 1 period (the one that just completed)
-  let targetMinutes: number;
-  if (minutesInto15mPeriod < 2) {
-    // Go back to previous completed period (2 periods back)
-    targetMinutes = currentMinutes - minutesInto15mPeriod - 30;
-  } else {
-    // Go back to the period that just completed (1 period back)
-    targetMinutes = currentMinutes - minutesInto15mPeriod - 15;
-  }
-  
-  // Handle negative minutes (wrap to previous hour)
-  if (targetMinutes < 0) {
-    targetMinutes += 60;
-    const targetPeriodStart = new Date(now);
-    targetPeriodStart.setUTCHours(targetPeriodStart.getUTCHours() - 1);
-    targetPeriodStart.setUTCMinutes(targetMinutes, 0, 0);
-    return targetPeriodStart;
-  }
-  
-  // Calculate the start of the target 15-minute period
-  const targetPeriodStart = new Date(now);
-  targetPeriodStart.setUTCMinutes(targetMinutes, 0, 0);
-  
-  return targetPeriodStart;
-}
-
-// Get completed 15m candle data for entry signals (using aggregated 1m data with pre-calculated features)
-export async function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle>> {
-  // Calculate the target 15-minute period to fetch
-  const targetPeriod = getMostRecentCompleted15mPeriod();
-  const periodEnd = new Date(targetPeriod.getTime() + 15 * 60 * 1000); // Add 15 minutes
-  
-  console.log(`🔍 [FAKE TRADER] Fetching 15m candle for period: ${targetPeriod.toISOString()} to ${periodEnd.toISOString()}`);
-  
-  // Use the same approach as backtest worker - aggregate 1m OHLCV data with pre-calculated features
-  const query = `
-    WITH aggregated_15m_candles AS (
-      SELECT 
-        o.symbol,
-        to_timestamp(floor(extract(epoch from o.ts) / (15*60)) * (15*60)) AT TIME ZONE 'UTC' as candle_start,
-        AVG(o.open::double precision) as open,
-        MAX(o.high::double precision) as high,
-        MIN(o.low::double precision) as low,
-        AVG(o.close::double precision) as close,
-        SUM(o.volume::double precision) as volume,
-        -- Aggregate features - use the latest values in each 15m period
-        AVG(COALESCE(f.roc_5m, 0)) as roc_5m,
-        AVG(COALESCE(f.vol_mult, 1)) as vol_mult,
-        AVG(COALESCE(f.roc_1m, 0)) as roc_1m,
-        AVG(COALESCE(f.roc_15m, 0)) as roc_15m,
-        AVG(COALESCE(f.roc_30m, 0)) as roc_30m,
-        AVG(COALESCE(f.roc_1h, 0)) as roc_1h,
-        AVG(COALESCE(f.roc_4h, 0)) as roc_4h,
-        AVG(COALESCE(f.rsi_14, 50)) as rsi_14,
-        AVG(COALESCE(f.ema_20, o.close::double precision)) as ema_20,
-        AVG(COALESCE(f.ema_50, o.close::double precision)) as ema_50,
-        AVG(COALESCE(f.bb_upper, o.close::double precision * 1.02)) as bb_upper,
-        AVG(COALESCE(f.bb_lower, o.close::double precision * 0.98)) as bb_lower,
-        AVG(COALESCE(f.spread_bps, 5)) as spread_bps,
-        COUNT(*) as minute_count
-      FROM ohlcv_1m o
-      LEFT JOIN features_1m f ON f.symbol = o.symbol AND f.ts = o.ts
-      WHERE o.symbol = ANY($1)
-        AND o.ts >= $2::timestamp 
-        AND o.ts < $3::timestamp
-      GROUP BY o.symbol, candle_start
-      HAVING COUNT(*) >= 10  -- Ensure we have most of the 15m period data
-    )
-    SELECT 
-      symbol,
-      candle_start as ts,
-      open, high, low, close, volume,
-      roc_5m, vol_mult, roc_1m, roc_15m, roc_30m, roc_1h, roc_4h,
-      rsi_14, ema_20, ema_50, bb_upper, bb_lower, spread_bps,
-      minute_count
-    FROM aggregated_15m_candles
-    WHERE candle_start = $2::timestamp  -- Only get the target period
-    ORDER BY symbol
-  `;
-  
-  const result = await pool.query(query, [symbols, targetPeriod.toISOString(), periodEnd.toISOString()]);
-  
-  console.log(`🔍 [FAKE TRADER] Query returned ${result.rows.length} rows for target period ${targetPeriod.toISOString()}`);
-  if (result.rows.length > 0) {
-    console.log(`🔍 [FAKE TRADER] Sample row:`, JSON.stringify(result.rows[0], null, 2));
-  }
-  
-  const candles: Record<string, Candle> = {};
-  for (const row of result.rows) {
-    candles[row.symbol] = {
-      ts: row.ts,
-      open: Number(row.open),
-      high: Number(row.high),
-      low: Number(row.low),
-      close: Number(row.close),
-      volume: Number(row.volume),
-      // Use pre-calculated features from the features_1m table
-      roc_5m: Number(row.roc_5m) || 0,
-      vol_mult: Number(row.vol_mult) || 1,
-      roc_1m: Number(row.roc_1m) || 0,
-      roc_15m: Number(row.roc_15m) || 0,
-      roc_30m: Number(row.roc_30m) || 0,
-      roc_1h: Number(row.roc_1h) || 0,
-      roc_4h: Number(row.roc_4h) || 0,
-      rsi_14: Number(row.rsi_14) || 50,
-      ema_20: Number(row.ema_20) || Number(row.close),
-      ema_50: Number(row.ema_50) || Number(row.close),
-      ema_200: Number(row.ema_50) || Number(row.close), // Use ema_50 as fallback for ema_200
-      macd: 0, // Not available in current features
-      macd_signal: 0,
-      bb_upper: Number(row.bb_upper) || Number(row.close) * 1.02,
-      bb_lower: Number(row.bb_lower) || Number(row.close) * 0.98,
-      book_imb: 1.0,
-      spread_bps: Number(row.spread_bps) || 5,
-      vol_avg_20: Number(row.volume) || 0, // Use current volume as fallback
-    };
-  }
-  
-  return candles;
-}
-
-// Check if new 15m candles are available since last check (using 1m data)
-export async function hasNew15mCandles(symbols: string[], lastCheckTime?: string): Promise<boolean> {
-  const timeThreshold = lastCheckTime || new Date(Date.now() - 16 * 60 * 1000).toISOString(); // Default: 16 minutes ago
-  
-  const query = `
-    WITH current_15m_periods AS (
-      SELECT DISTINCT
-        symbol,
-        date_trunc('hour', ts) + INTERVAL '15 minutes' * FLOOR(EXTRACT(MINUTE FROM ts) / 15) as period_start
-      FROM ohlcv_1m
-      WHERE symbol = ANY($1)
-      AND ts > $2
-      AND ts <= NOW() - INTERVAL '15 minutes'  -- Only completed 15m periods
-    )
-    SELECT COUNT(DISTINCT period_start) as new_count
-    FROM current_15m_periods
-  `;
-  
-  const result = await pool.query(query, [symbols, timeThreshold]);
-  return parseInt(result.rows[0].new_count) > 0;
-}
-
-// Store last processed candle timestamp for run
-export async function updateLastProcessedCandle(runId: string, timestamp: string): Promise<void> {
-  const query = `
-    UPDATE ft_runs 
-    SET last_processed_candle = $2
-    WHERE run_id = $1
-  `;
-  
-  await pool.query(query, [runId, timestamp]);
-}
-
-// Get last processed candle timestamp for run  
-export async function getLastProcessedCandle(runId: string): Promise<string | null> {
-  const query = `
-    SELECT last_processed_candle
-    FROM ft_runs 
-    WHERE run_id = $1
-  `;
-  
-  const result = await pool.query(query, [runId]);
-  return result.rows[0]?.last_processed_candle || null;
-}
-
-// Keep the original function for backward compatibility (now uses live 1m data)
-export async function getCurrentCandles(symbols: string[]): Promise<Record<string, Candle>> {
-  const query = `
-    WITH latest_candles AS (
-      SELECT DISTINCT ON (symbol) 
-        symbol,
-        ts,
-        open::double precision AS open,
-        high::double precision AS high,
-        low::double precision AS low,
-        close::double precision AS close,
-        volume::double precision AS volume
-      FROM ohlcv_1m 
-      WHERE symbol = ANY($1)
-      AND ts >= NOW() - INTERVAL '1 hour'  -- Look back 1 hour to find latest
-      ORDER BY symbol, ts DESC
-    ),
-    latest_features AS (
-      SELECT DISTINCT ON (symbol)
-        symbol,
-        ts,
-        roc_1m, roc_5m, roc_15m, roc_30m, roc_1h, roc_4h,
-        rsi_14, ema_20, ema_50,
-        macd, macd_signal, bb_upper, bb_lower,
-        vol_avg_20, vol_mult, book_imb, spread_bps
-      FROM features_1m
-      WHERE symbol = ANY($1)
-      AND ts >= NOW() - INTERVAL '1 hour'
-      ORDER BY symbol, ts DESC
-    )
-    SELECT 
-      c.*,
-      f.roc_1m, f.roc_5m, f.roc_15m, f.roc_30m, f.roc_1h, f.roc_4h,
-      f.rsi_14, f.ema_20, f.ema_50,
-      f.macd, f.macd_signal, f.bb_upper, f.bb_lower,
-      f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
-    FROM latest_candles c
-    LEFT JOIN latest_features f ON f.symbol = c.symbol AND f.ts = c.ts
-  `;
-  
-  const result = await pool.query(query, [symbols]);
-  
-  const candles: Record<string, Candle> = {};
-  for (const row of result.rows) {
-    candles[row.symbol] = {
-      ts: row.ts,
-      open: Number(row.open),
-      high: Number(row.high),
-      low: Number(row.low),
-      close: Number(row.close),
-      volume: Number(row.volume),
-      roc_1m: row.roc_1m,
-      roc_5m: row.roc_5m,
-      roc_15m: row.roc_15m,
-      roc_30m: row.roc_30m,
-      roc_1h: row.roc_1h,
-      roc_4h: row.roc_4h,
-      rsi_14: row.rsi_14,
-      ema_20: row.ema_20,
-      ema_50: row.ema_50,
-      ema_200: row.ema_50, // Use ema_50 as proxy for ema_200
-      macd: row.macd,
-      macd_signal: row.macd_signal,
-      bb_upper: row.bb_upper,
-      bb_lower: row.bb_lower,
-      vol_avg_20: row.vol_avg_20,
-      vol_mult: row.vol_mult,
-      book_imb: row.book_imb,
-      spread_bps: row.spread_bps,
-    };
-  }
-  
-  return candles;
-}
-
 // Get current positions for a run
 export async function getCurrentPositions(runId: string): Promise<FakePosition[]> {
   const query = `
     SELECT * FROM ft_positions 
     WHERE run_id = $1 AND status = 'open'
-    ORDER BY opened_at DESC
+    ORDER BY created_at DESC
   `;
   
   const result = await pool.query(query, [runId]);
@@ -337,46 +57,46 @@ export async function getCurrentPositions(runId: string): Promise<FakePosition[]
   }));
 }
 
-// Create new trade
+// Create a new trade
 export async function createTrade(trade: Omit<FakeTrade, 'trade_id' | 'created_at'>): Promise<string> {
   const query = `
-    INSERT INTO ft_trades (
-      run_id, symbol, side, entry_ts, qty, entry_px, 
-      realized_pnl, unrealized_pnl, fees, reason, leverage, status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    INSERT INTO ft_trades (run_id, symbol, side, entry_ts, exit_ts, qty, entry_px, exit_px, 
+                          realized_pnl, unrealized_pnl, fees, reason, leverage, status)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     RETURNING trade_id
   `;
   
   const values = [
-    trade.run_id, trade.symbol, trade.side, trade.entry_ts, trade.qty, trade.entry_px,
-    trade.realized_pnl, trade.unrealized_pnl, trade.fees, trade.reason, trade.leverage, trade.status
+    trade.run_id, trade.symbol, trade.side, trade.entry_ts, trade.exit_ts,
+    trade.qty, trade.entry_px, trade.exit_px, trade.realized_pnl, trade.unrealized_pnl,
+    trade.fees, trade.reason, trade.leverage, trade.status
   ];
   
   const result = await pool.query(query, values);
   return result.rows[0].trade_id;
 }
 
-// Create new position
-export async function createPosition(position: Omit<FakePosition, 'position_id' | 'opened_at' | 'last_update'>): Promise<string> {
+// Create a new position
+export async function createPosition(position: Omit<FakePosition, 'position_id' | 'created_at' | 'last_update'>): Promise<string> {
   const query = `
-    INSERT INTO ft_positions (
-      run_id, symbol, side, size, entry_price, current_price,
-      unrealized_pnl, cost_basis, market_value, stop_loss, take_profit, leverage, status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    INSERT INTO ft_positions (run_id, symbol, side, size, entry_price, current_price, 
+                             unrealized_pnl, cost_basis, market_value, stop_loss, take_profit, 
+                             leverage, opened_at, status)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     RETURNING position_id
   `;
   
   const values = [
-    position.run_id, position.symbol, position.side, position.size, position.entry_price, position.current_price,
-    position.unrealized_pnl, position.cost_basis, position.market_value, position.stop_loss, position.take_profit, 
-    position.leverage, position.status
+    position.run_id, position.symbol, position.side, position.size, position.entry_price,
+    position.current_price, position.unrealized_pnl, position.cost_basis, position.market_value,
+    position.stop_loss, position.take_profit, position.leverage, position.opened_at, position.status
   ];
   
   const result = await pool.query(query, values);
   return result.rows[0].position_id;
 }
 
-// Update position with current price and PnL
+// Update a position (legacy signature for compatibility)
 export async function updatePosition(positionId: string, currentPrice: number, unrealizedPnl: number, marketValue: number): Promise<void> {
   const query = `
     UPDATE ft_positions 
@@ -387,64 +107,169 @@ export async function updatePosition(positionId: string, currentPrice: number, u
   await pool.query(query, [positionId, currentPrice, unrealizedPnl, marketValue]);
 }
 
-// Close position
-export async function closePosition(positionId: string, exitPrice: number, realizedPnl: number): Promise<void> {
+// Update a position with object parameter (new signature)
+export async function updatePositionObj(positionId: string, updates: Partial<Pick<FakePosition, 'current_price' | 'unrealized_pnl' | 'market_value' | 'status'>>): Promise<void> {
+  const updateFields: string[] = [];
+  const values: any[] = [];
+  let paramCount = 1;
+  
+  if (updates.current_price !== undefined) {
+    updateFields.push(`current_price = $${paramCount++}`);
+    values.push(updates.current_price);
+  }
+  
+  if (updates.unrealized_pnl !== undefined) {
+    updateFields.push(`unrealized_pnl = $${paramCount++}`);
+    values.push(updates.unrealized_pnl);
+  }
+  
+  if (updates.market_value !== undefined) {
+    updateFields.push(`market_value = $${paramCount++}`);
+    values.push(updates.market_value);
+  }
+  
+  if (updates.status !== undefined) {
+    updateFields.push(`status = $${paramCount++}`);
+    values.push(updates.status);
+  }
+  
+  updateFields.push(`last_update = NOW()`);
+  values.push(positionId);
+  
   const query = `
     UPDATE ft_positions 
-    SET status = 'closed', current_price = $2, last_update = NOW()
-    WHERE position_id = $1
+    SET ${updateFields.join(', ')}
+    WHERE position_id = $${paramCount}
   `;
-  
-  await pool.query(query, [positionId, exitPrice]);
-  
-  // Also update the corresponding trade
-  const updateTradeQuery = `
-    UPDATE ft_trades 
-    SET exit_ts = NOW(), exit_px = $2, realized_pnl = $3, status = 'closed'
-    WHERE run_id = (SELECT run_id FROM ft_positions WHERE position_id = $1)
-    AND symbol = (SELECT symbol FROM ft_positions WHERE position_id = $1)
-    AND status = 'open'
-  `;
-  
-  await pool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
-}
-
-// Log strategy signal
-export async function logSignal(signal: Omit<FakeSignal, 'signal_id' | 'created_at'>): Promise<void> {
-  const query = `
-    INSERT INTO ft_signals (
-      run_id, symbol, signal_type, side, size, price,
-      candle_data, strategy_state, rejection_reason, executed, execution_price, execution_notes, signal_ts
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-  `;
-  
-  const values = [
-    signal.run_id, signal.symbol, signal.signal_type, signal.side, signal.size, signal.price,
-    JSON.stringify(signal.candle_data), JSON.stringify(signal.strategy_state), signal.rejection_reason,
-    signal.executed, signal.execution_price, signal.execution_notes, signal.signal_ts
-  ];
   
   await pool.query(query, values);
 }
 
-// Update run status
-export async function updateRunStatus(runId: string, status: string, error?: string): Promise<void> {
+// Close a position
+export async function closePosition(positionId: string, exitPrice: number, realizedPnl: number): Promise<void> {
   const query = `
-    UPDATE ft_runs 
-    SET status = $2, last_update = NOW(), error = $3
-    WHERE run_id = $1
+    UPDATE ft_positions 
+    SET status = 'closed', current_price = $2, unrealized_pnl = 0, 
+        market_value = 0, last_update = NOW()
+    WHERE position_id = $1
   `;
   
-  await pool.query(query, [runId, status, error]);
+  await pool.query(query, [positionId, exitPrice]);
+}
+
+// Log a signal
+export async function logSignal(signal: Omit<FakeSignal, 'signal_id' | 'created_at'>): Promise<string> {
+  const query = `
+    INSERT INTO ft_signals (run_id, symbol, signal_type, side, size, price, candle_data, 
+                           strategy_state, rejection_reason, executed, execution_price, 
+                           execution_notes, signal_ts)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    RETURNING signal_id
+  `;
+  
+  const values = [
+    signal.run_id, signal.symbol, signal.signal_type, signal.side, signal.size,
+    signal.price, JSON.stringify(signal.candle_data), JSON.stringify(signal.strategy_state),
+    signal.rejection_reason, signal.executed, signal.execution_price, signal.execution_notes,
+    signal.signal_ts
+  ];
+  
+  const result = await pool.query(query, values);
+  return result.rows[0].signal_id;
+}
+
+// Update run status (legacy signature for compatibility)
+export async function updateRunStatus(runId: string, status: string, error?: string): Promise<void> {
+  if (error) {
+    const query = `
+      UPDATE ft_runs 
+      SET status = $2, error = $3, last_update = NOW()
+      WHERE run_id = $1
+    `;
+    await pool.query(query, [runId, status, error]);
+  } else {
+    const query = `
+      UPDATE ft_runs 
+      SET status = $2, last_update = NOW()
+      WHERE run_id = $1
+    `;
+    await pool.query(query, [runId, status]);
+  }
 }
 
 // Update run capital
-export async function updateRunCapital(runId: string, currentCapital: number): Promise<void> {
+export async function updateRunCapital(runId: string, newCapital: number): Promise<void> {
   const query = `
     UPDATE ft_runs 
     SET current_capital = $2, last_update = NOW()
     WHERE run_id = $1
   `;
   
-  await pool.query(query, [runId, currentCapital]);
+  await pool.query(query, [runId, newCapital]);
+}
+
+// Get today's PnL
+export async function getTodaysPnL(runId: string): Promise<number> {
+  const query = `
+    SELECT COALESCE(SUM(realized_pnl), 0) as total_pnl
+    FROM ft_trades 
+    WHERE run_id = $1 AND DATE(entry_ts) = CURRENT_DATE
+  `;
+  
+  const result = await pool.query(query, [runId]);
+  return Number(result.rows[0].total_pnl);
+}
+
+// Get maximum drawdown
+export async function getMaxDrawdown(runId: string): Promise<number> {
+  const query = `
+    SELECT 
+      starting_capital,
+      MIN(current_capital) as lowest_capital
+    FROM ft_runs 
+    WHERE run_id = $1
+    GROUP BY starting_capital
+  `;
+  
+  const result = await pool.query(query, [runId]);
+  if (result.rows.length === 0) return 0;
+  
+  const { starting_capital, lowest_capital } = result.rows[0];
+  const maxDrawdownPct = ((starting_capital - lowest_capital) / starting_capital) * 100;
+  return Math.max(0, maxDrawdownPct);
+}
+
+// Legacy function for backward compatibility - alias for getRecentCandles
+export async function getCurrentCandles(symbols: string[]): Promise<Record<string, Candle>> {
+  const candles = await getRecentCandles(symbols, 1); // Get most recent candle
+  const result: Record<string, Candle> = {};
+  
+  for (const [symbol, candleArray] of Object.entries(candles)) {
+    if (candleArray.length > 0) {
+      result[symbol] = candleArray[candleArray.length - 1]; // Get the latest candle
+    }
+  }
+  
+  return result;
+}
+
+// Placeholder functions for features that might be used by fake trader but aren't needed with 1m candles
+export async function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle[]>> {
+  console.log('⚠️ getCompleted15mCandles is deprecated - using 1m candles instead');
+  return await getRecentCandles(symbols, 60);
+}
+
+export async function hasNew15mCandles(symbols: string[]): Promise<boolean> {
+  console.log('⚠️ hasNew15mCandles is deprecated with 1m candle approach');
+  return true; // Always return true since we process every minute
+}
+
+export async function getLastProcessedCandle(runId: string): Promise<string | null> {
+  console.log('⚠️ getLastProcessedCandle is deprecated with 1m candle approach');
+  return null;
+}
+
+export async function updateLastProcessedCandle(runId: string, timestamp: string): Promise<void> {
+  console.log('⚠️ updateLastProcessedCandle is deprecated with 1m candle approach');
+  // No-op since we don't track processed candles with the new approach
 }

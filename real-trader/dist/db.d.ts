@@ -1,9 +1,10 @@
-import { Pool } from 'pg';
-import type { RealTradeRun, RealTrade, RealPosition, RealSignal, Candle } from './types.js';
-export declare const pool: Pool;
-export declare function testConnection(): Promise<void>;
+import { Candle } from 'trading-shared';
+import type { RealTradeRun, RealTrade, RealPosition, RealSignal } from './types.js';
+export declare const pool: import("pg").Pool;
+export declare const testConnection: () => Promise<void>;
+export declare const getRecentCandles: (symbols: string[], lookbackMinutes?: number) => Promise<Record<string, Candle[]>>;
+export declare const getLivePrices: (symbols: string[]) => Promise<Record<string, number>>;
 export declare function getActiveRuns(): Promise<RealTradeRun[]>;
-export declare function getLivePrices(symbols: string[]): Promise<Record<string, number>>;
 export declare function getCompleted15mCandles(symbols: string[]): Promise<Record<string, Candle>>;
 export declare function hasNew15mCandles(symbols: string[], lastCheckTime?: string): Promise<boolean>;
 export declare function updateLastProcessedCandle(runId: string, timestamp: string): Promise<void>;

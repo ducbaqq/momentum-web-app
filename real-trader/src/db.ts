@@ -1,27 +1,20 @@
-import { Pool } from 'pg';
-import type { RealTradeRun, RealTrade, RealPosition, RealSignal, Candle } from './types.js';
+import { 
+  createPool,
+  testConnection as sharedTestConnection,
+  getRecentCandles as sharedGetRecentCandles,
+  getLivePrices as sharedGetLivePrices,
+  Candle
+} from 'trading-shared';
+import type { RealTradeRun, RealTrade, RealPosition, RealSignal } from './types.js';
 
 // Initialize database connection
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-});
+export const pool = createPool();
 
-// Test connection
-export async function testConnection(): Promise<void> {
-  try {
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
-    console.log('✓ Database connected successfully');
-  } catch (error) {
-    console.error('✗ Database connection failed:', error);
-    throw error;
-  }
-}
+// Re-export shared functions
+export const testConnection = () => sharedTestConnection(pool);
+export const getRecentCandles = (symbols: string[], lookbackMinutes?: number) => 
+  sharedGetRecentCandles(pool, symbols, lookbackMinutes);
+export const getLivePrices = (symbols: string[]) => sharedGetLivePrices(pool, symbols);
 
 // Get active trading runs (including winding down runs)
 export async function getActiveRuns(): Promise<RealTradeRun[]> {
@@ -44,27 +37,6 @@ export async function getActiveRuns(): Promise<RealTradeRun[]> {
   }));
 }
 
-// Get live ticker prices (most recent 1m candle for position management)
-export async function getLivePrices(symbols: string[]): Promise<Record<string, number>> {
-  const query = `
-    SELECT DISTINCT ON (symbol) 
-      symbol,
-      close::double precision AS close
-    FROM ohlcv_1m 
-    WHERE symbol = ANY($1)
-    AND ts >= NOW() - INTERVAL '10 minutes'  -- Look back 10 minutes to find latest
-    ORDER BY symbol, ts DESC
-  `;
-  
-  const result = await pool.query(query, [symbols]);
-  
-  const prices: Record<string, number> = {};
-  for (const row of result.rows) {
-    prices[row.symbol] = Number(row.close);
-  }
-  
-  return prices;
-}
 
 // Helper function to get the most recent completed 15-minute period
 function getMostRecentCompleted15mPeriod(): Date {

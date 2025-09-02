@@ -483,6 +483,7 @@ class FakeTrader {
         stop_loss: signal.stopLoss,
         take_profit: signal.takeProfit,
         leverage: signal.leverage || 1,
+        opened_at: new Date().toISOString(),
         status: 'open'
       });
       
@@ -577,6 +578,7 @@ class FakeTrader {
           stop_loss: signal.stopLoss,
           take_profit: signal.takeProfit,
           leverage: signal.leverage || 1,
+          opened_at: new Date().toISOString(),
           status: 'open'
         });
         
