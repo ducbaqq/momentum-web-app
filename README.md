@@ -15,6 +15,18 @@ npm run dev
 ```
 Visit http://localhost:3000
 
+## Development
+
+### Temporary Files
+All temporary files for debugging, testing, and experimentation should be created in the `./temp/` folder. This folder is automatically ignored by git.
+
+**Examples:**
+- Debug scripts: `temp/debug-database.js`
+- Test files: `temp/test-new-feature.js`
+- One-off analysis: `temp/analyze-market-data.js`
+
+**Note:** The `temp/` folder is gitignored, so these files won't be committed to version control.
+
 ## API
 - `GET /api/ticks/latest` — latest row per symbol from `latest_ticks`
 - `GET /api/signals/recent` — most recent signal per symbol within last hour

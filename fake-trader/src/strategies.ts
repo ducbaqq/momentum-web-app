@@ -52,9 +52,9 @@ export function momentumBreakoutV2Strategy(
   const signals: TradeSignal[] = [];
   
   // Get required parameters
-  const minRocThreshold = params.minRoc5m || 1.2; // Used for all timeframes (rename in future)
-  const minVolMult = params.minVolMult || 3;
-  const maxSpreadBps = params.maxSpreadBps || 10;
+  const minRocThreshold = params.minRoc5m !== undefined ? params.minRoc5m : 0.5; // Default to 0.5 (50%) instead of 1.2 (120%)
+  const minVolMult = params.minVolMult !== undefined ? params.minVolMult : 2;
+  const maxSpreadBps = params.maxSpreadBps !== undefined ? params.maxSpreadBps : 8;
   const leverage = params.leverage || 1;
   const riskPct = 20; // Risk 20% of equity per trade
   const rsiExitLevel = 75;
@@ -64,6 +64,8 @@ export function momentumBreakoutV2Strategy(
   const rocValue = getRocValue(candle, timeframe);
   const volMult = candle.vol_mult ?? 1;
   const spreadBps = candle.spread_bps ?? 0;
+
+
   
   const existingPosition = state.positions.find(p => p.symbol === state.symbol && p.status === 'open');
   

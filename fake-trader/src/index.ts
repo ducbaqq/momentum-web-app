@@ -200,12 +200,13 @@ class FakeTrader {
     // Get recent candles at the configured timeframe
     console.log(`   📊 Evaluating entry signals using recent ${run.timeframe} candles`);
 
-    // Get recent candles for all symbols (look back 60 minutes, but aggregated to timeframe)
-    const recentCandles = await getRecentCandles(run.symbols, 60, run.timeframe);
-    
+    // Get recent candles for all symbols (look back enough to have historical context)
+    const lookbackMinutes = 300; // Look back 5 hours for enough historical context
+    const recentCandles = await getRecentCandles(run.symbols, lookbackMinutes, run.timeframe);
+
     // Get momentum_breakout_v2 strategy function
     const strategy = getStrategy('momentum_breakout_v2');
-    
+
     // Process each symbol's recent candles for entry signals
     for (const symbol of run.symbols) {
       const candles = recentCandles[symbol] || [];
@@ -213,18 +214,28 @@ class FakeTrader {
         console.log(`⏭️  Skipping ${symbol} - no recent candle data`);
         continue;
       }
-      
-      console.log(`   📊 Processing ${candles.length} recent 1-minute candles for ${symbol}`);
-      
-      // Process each candle like the backtest does
-      for (let i = candles.length - 5; i < candles.length; i++) { // Only check last 5 candles to avoid spam
-        if (i < 0) continue;
-        
+
+      console.log(`   📊 Processing ${candles.length} recent candles for ${symbol}`);
+
+      // Process candles like the backtest does - check if we haven't processed this candle before
+      const lastProcessedCandle = await getLastProcessedCandle(run.run_id, symbol);
+
+      for (let i = 0; i < candles.length; i++) {
         const candle = candles[i];
+
+        // Skip candles we've already processed
+        if (lastProcessedCandle && new Date(candle.ts) <= new Date(lastProcessedCandle)) {
+          continue;
+        }
+
+        // Process this candle for entry signals
         await this.processSymbolEntrySignals(run, symbol, candle, strategy);
-        
-        // Only process one candle at a time to avoid multiple simultaneous trades
-        // In the next cycle, we'll process newer candles
+
+        // Mark this candle as processed
+        await updateLastProcessedCandle(run.run_id, symbol, candle.ts);
+
+        // Only process one new candle per symbol per cycle to avoid spam
+        // This ensures we don't flood with signals on startup
         break;
       }
     }
