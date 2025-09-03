@@ -377,7 +377,7 @@ export async function hasNew15mCandles(symbols: string[], lastCheckTime?: string
 }
 
 // Store last processed candle timestamp for run
-export async function updateLastProcessedCandle(runId: string, timestamp: string): Promise<void> {
+export async function updateLastProcessedCandle(runId: string, symbol: string, timestamp: string): Promise<void> {
   const query = `
     UPDATE ft_runs 
     SET last_processed_candle = $2
@@ -387,16 +387,21 @@ export async function updateLastProcessedCandle(runId: string, timestamp: string
   await pool.query(query, [runId, timestamp]);
 }
 
-// Get last processed candle timestamp for run  
-export async function getLastProcessedCandle(runId: string): Promise<string | null> {
+// Get last processed candle timestamp for run and symbol
+export async function getLastProcessedCandle(runId: string, symbol: string): Promise<string | null> {
   const query = `
     SELECT last_processed_candle
-    FROM ft_runs 
+    FROM ft_runs
     WHERE run_id = $1
   `;
-  
+
   const result = await pool.query(query, [runId]);
   return result.rows[0]?.last_processed_candle || null;
+}
+
+// Legacy function for backward compatibility
+export async function getLastProcessedCandleForRun(runId: string): Promise<string | null> {
+  return getLastProcessedCandle(runId, '');
 }
 
 // Keep the original function for backward compatibility (now uses live 1m data)
