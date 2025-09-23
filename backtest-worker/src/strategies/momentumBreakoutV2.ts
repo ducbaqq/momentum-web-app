@@ -148,7 +148,7 @@ export async function runMomentumStrategy(
       side: trade.side === 'BUY' ? 'LONG' : 'SHORT',
       qty: trade.filledQuantity,
       entryPx: trade.averageFillPrice,
-      exitPx: trade.averageFillPrice, // Simplified
+      exitPx: trade.execution?.fillPrice || trade.averageFillPrice, // Use execution price for exits
       pnl: trade.position?.realizedPnl || 0, // Use actual realized PnL from the trade
       fees: trade.commission,
       reason: 'momentum_breakout'

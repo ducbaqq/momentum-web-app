@@ -337,10 +337,10 @@ class FakeTrader {
       const positionValue = position.size * currentPrice; // Value received from closing position
       
       await closePosition(position.position_id, currentPrice, realizedPnl);
-      
-      // Update run capital - add back position value and subtract fees
-      // Note: realizedPnl is already the difference, so we add position cost basis + realizedPnl - fees
-      const newCapital = run.current_capital + positionValue - fees;
+
+      // Update run capital - add back margin + realized P&L - fees
+      // For leverage: margin was deducted on open, add it back + P&L on leveraged position
+      const newCapital = run.current_capital + position.cost_basis + realizedPnl - fees;
       await updateRunCapital(run.run_id, newCapital);
       run.current_capital = newCapital; // Update local copy
       
@@ -445,12 +445,13 @@ class FakeTrader {
       
       // Use 15-minute candle close price for execution (consistent with backtest)
       const executionPrice = candle.close; // Execute at 15m candle close price
+      const positionValue = signal.size * executionPrice; // Total position value (margin * leverage)
+      const marginRequired = positionValue / (signal.leverage || 1); // Margin you need to put up
       const fees = signal.size * executionPrice * 0.0004; // 0.04% fees
-      const positionCost = signal.size * executionPrice; // Cost of opening the position
-      
-      if (run.current_capital < (positionCost + fees)) {
-        console.log(`     💸 Insufficient capital: need $${(positionCost + fees).toFixed(2)}, have $${run.current_capital.toFixed(2)} - skipping signal`);
-        
+
+      if (run.current_capital < (marginRequired + fees)) {
+        console.log(`     💸 Insufficient capital: need $${(marginRequired + fees).toFixed(2)}, have $${run.current_capital.toFixed(2)} - skipping signal`);
+
         // Log the rejected signal
         await logSignal({
           run_id: run.run_id,
@@ -461,15 +462,15 @@ class FakeTrader {
           price: signal.price,
           candle_data: candle,
           executed: false,
-          rejection_reason: `insufficient_capital_need_${(positionCost + fees).toFixed(2)}_have_${run.current_capital.toFixed(2)}`,
+          rejection_reason: `insufficient_capital_need_${(marginRequired + fees).toFixed(2)}_have_${run.current_capital.toFixed(2)}`,
           signal_ts: new Date().toISOString()
         });
-        
+
         return; // Exit early - don't execute the signal
       }
       
-      // Update run capital - reduce by position cost + fees when opening position
-      const newCapital = run.current_capital - positionCost - fees;
+      // Update run capital - reduce by margin required + fees when opening position
+      const newCapital = run.current_capital - marginRequired - fees;
       await updateRunCapital(run.run_id, newCapital);
       run.current_capital = newCapital; // Update local copy
       
@@ -497,7 +498,7 @@ class FakeTrader {
         entry_price: executionPrice,
         current_price: executionPrice,
         unrealized_pnl: 0,
-        cost_basis: signal.size * executionPrice,
+        cost_basis: marginRequired, // Store margin amount, not full position value
         market_value: signal.size * executionPrice,
         stop_loss: signal.stopLoss,
         take_profit: signal.takeProfit,
