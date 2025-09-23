@@ -168,7 +168,8 @@ async function handleForceExit(runId: string) {
   for (const position of positions.rows) {
     const currentPrice = priceMap[position.symbol] || position.current_price;
     const realizedPnl = calculateRealizedPnL(position, currentPrice);
-    
+    const fees = position.size * currentPrice * 0.0004; // 0.04% fees
+
     // Create exit trade record
     await pool.query(`
       INSERT INTO ft_trades (run_id, symbol, side, entry_ts, exit_ts, qty, entry_px, exit_px, realized_pnl, fees, reason, leverage, status)
@@ -182,23 +183,24 @@ async function handleForceExit(runId: string) {
       position.entry_price,
       currentPrice,
       realizedPnl,
-      position.size * currentPrice * 0.0004, // 0.04% fees
+      fees,
       position.leverage
     ]);
 
     // Close the position
     await pool.query(`
-      UPDATE ft_positions 
+      UPDATE ft_positions
       SET status = 'closed', current_price = $2, unrealized_pnl = $3
       WHERE position_id = $1
     `, [position.position_id, currentPrice, realizedPnl]);
 
-    // Update run capital
+    // Update run capital - return margin + realized P&L - fees
+    const capitalAdjustment = Number(position.cost_basis) + realizedPnl - fees;
     await pool.query(`
-      UPDATE ft_runs 
+      UPDATE ft_runs
       SET current_capital = current_capital + $2
       WHERE run_id = $1
-    `, [runId, realizedPnl]);
+    `, [runId, capitalAdjustment]);
   }
 }
 
