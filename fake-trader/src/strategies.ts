@@ -56,7 +56,7 @@ export function momentumBreakoutV2Strategy(
   const minVolMult = params.minVolMult !== undefined ? params.minVolMult : 2;
   const maxSpreadBps = params.maxSpreadBps !== undefined ? params.maxSpreadBps : 8;
   const leverage = params.leverage || 1;
-  const riskPct = 20; // Risk 20% of equity per trade
+  const riskPct = params.riskPct !== undefined ? params.riskPct : 20; // Risk percentage of equity per trade
   const rsiExitLevel = 75;
   const timeframe = state.timeframe || '5m'; // Default to 5m for backward compatibility
 
