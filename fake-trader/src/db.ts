@@ -603,13 +603,34 @@ export async function updateRunStatus(runId: string, status: string, error?: str
   await pool.query(query, [runId, status, error]);
 }
 
+// Get trades for a run
+export async function getTrades(runId: string): Promise<FakeTrade[]> {
+  const query = `
+    SELECT * FROM ft_trades
+    WHERE run_id = $1
+    ORDER BY entry_ts DESC
+  `;
+
+  const result = await pool.query(query, [runId]);
+  return result.rows.map(row => ({
+    ...row,
+    qty: Number(row.qty),
+    entry_px: Number(row.entry_px),
+    exit_px: row.exit_px ? Number(row.exit_px) : undefined,
+    realized_pnl: Number(row.realized_pnl),
+    unrealized_pnl: Number(row.unrealized_pnl),
+    fees: Number(row.fees),
+    leverage: Number(row.leverage),
+  }));
+}
+
 // Update run capital
 export async function updateRunCapital(runId: string, currentCapital: number): Promise<void> {
   const query = `
-    UPDATE ft_runs 
+    UPDATE ft_runs
     SET current_capital = $2, last_update = NOW()
     WHERE run_id = $1
   `;
-  
+
   await pool.query(query, [runId, currentCapital]);
 }

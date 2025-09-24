@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import cron from 'node-cron';
-import { 
-  testConnection, 
-  getActiveRuns, 
+import {
+  testConnection,
+  getActiveRuns,
   getCurrentCandles,
   getCompleted15mCandles,
   getRecentCandles,
@@ -18,6 +18,7 @@ import {
   logSignal,
   updateRunStatus,
   updateRunCapital,
+  getTrades,
   pool
 } from './db.js';
 import { getStrategy } from './strategies.js';
@@ -306,13 +307,21 @@ class FakeTrader {
   }
 
   private async updateRunCapitalWithUnrealizedPnl(run: FakeTradeRun) {
-    // Get all positions to calculate total margin and unrealized P&L
+    // Get all positions and trades to calculate total P&L
     const positions = await getCurrentPositions(run.run_id);
-    const totalMarginInvested = positions.reduce((sum, pos) => sum + Number(pos.cost_basis), 0);
-    const totalUnrealizedPnl = positions.reduce((sum, pos) => sum + Number(pos.unrealized_pnl), 0);
+    const trades = await getTrades(run.run_id);
 
-    // Real-time capital = starting capital - margin invested + unrealized P&L - accumulated fees
-    const realTimeCapital = Number(run.starting_capital) - totalMarginInvested + totalUnrealizedPnl;
+    const totalUnrealizedPnl = positions.reduce((sum, pos) => sum + Number(pos.unrealized_pnl), 0);
+    const totalRealizedPnl = trades.filter(t => t.status === 'closed').reduce((sum, trade) => sum + Number(trade.realized_pnl), 0);
+
+    // Get total fees paid for all trades (both open and closed)
+    const totalFeesPaid = trades.reduce((sum, trade) => sum + Number(trade.fees), 0);
+
+    // Get total margin currently invested in open positions
+    const totalMarginInvested = positions.reduce((sum, pos) => sum + Number(pos.cost_basis), 0);
+
+    // Real-time capital = starting capital - total fees paid - margin invested + realized P&L + unrealized P&L
+    const realTimeCapital = Number(run.starting_capital) - totalFeesPaid - totalMarginInvested + totalRealizedPnl + totalUnrealizedPnl;
 
     // Update the run's current capital
     await updateRunCapital(run.run_id, realTimeCapital);
