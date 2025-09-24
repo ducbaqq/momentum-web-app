@@ -231,11 +231,12 @@ export default function FakeTraderDetailsPage() {
     return `$${capital.toLocaleString()}`;
   }
 
-  function calculateTotalPnL(run: FakeTradeRun) {
-    // Calculate total P&L as: sum of realized P&L from closed trades + unrealized P&L from open positions
-    const realizedPnl = closedTrades.reduce((sum, trade) => sum + trade.realized_pnl, 0);
+  function calculateTotalPnL(run: FakeTradeRun, allTrades: FakeTrade[], openPositions: FakePosition[]) {
+    // Calculate total P&L as: sum of realized P&L from closed trades + unrealized P&L from open positions - all fees
+    const realizedPnl = allTrades.filter(t => t.status === 'closed').reduce((sum, trade) => sum + trade.realized_pnl, 0);
     const unrealizedPnl = openPositions.reduce((sum, position) => sum + position.unrealized_pnl, 0);
-    const totalPnl = realizedPnl + unrealizedPnl;
+    const totalFees = allTrades.reduce((sum, trade) => sum + trade.fees, 0);
+    const totalPnl = realizedPnl + unrealizedPnl - totalFees;
     const pnlPercent = ((totalPnl / run.starting_capital) * 100);
     return { pnl: totalPnl, pnlPercent };
   }
@@ -271,9 +272,13 @@ export default function FakeTraderDetailsPage() {
     );
   }
 
-  const { pnl, pnlPercent } = calculateTotalPnL(run);
   const openPositions = positions.filter(p => p.status === 'open');
   const closedTrades = trades.filter(t => t.status === 'closed');
+  const { pnl, pnlPercent } = calculateTotalPnL(run, trades, openPositions);
+
+  // Calculate available funds (current capital - margin invested in open positions)
+  const marginInvested = openPositions.reduce((sum, pos) => sum + pos.cost_basis, 0);
+  const availableFunds = run.current_capital - marginInvested;
 
   return (
     <main className="p-6 space-y-6">
@@ -370,7 +375,7 @@ export default function FakeTraderDetailsPage() {
       {/* Capital Summary */}
       <div className="rounded-xl border border-border bg-card p-6">
         <h2 className="text-2xl font-bold mb-6">💰 Capital Summary</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <div className="text-center">
             <div className="text-sub text-sm">Starting Capital</div>
             <div className="text-3xl font-bold text-blue-400">
@@ -384,9 +389,15 @@ export default function FakeTraderDetailsPage() {
             </div>
           </div>
           <div className="text-center">
-            <div className="text-sub text-sm">Current Capital</div>
+            <div className="text-sub text-sm">Total Value</div>
             <div className={clsx("text-3xl font-bold", run.current_capital >= run.starting_capital ? "text-good" : "text-bad")}>
               {formatCapital(run.current_capital)}
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-sub text-sm">Available Funds</div>
+            <div className={clsx("text-3xl font-bold", availableFunds >= run.starting_capital ? "text-good" : "text-bad")}>
+              {formatCapital(availableFunds)}
             </div>
           </div>
         </div>

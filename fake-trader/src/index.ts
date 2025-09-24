@@ -316,8 +316,9 @@ class FakeTrader {
     // Get total margin currently invested in open positions
     const totalMarginInvested = positions.reduce((sum, pos) => sum + Number(pos.cost_basis), 0);
 
-    // Real-time capital = starting capital - total fees paid - margin invested + realized P&L + unrealized P&L
-    const realTimeCapital = Number(run.starting_capital) - totalFeesPaid - totalMarginInvested + totalRealizedPnl + totalUnrealizedPnl;
+    // Real-time capital = starting capital - total fees paid + realized P&L + unrealized P&L
+    // Note: margin invested is not subtracted because it's still allocated to positions and unrealized P&L reflects its current value
+    const realTimeCapital = Number(run.starting_capital) - totalFeesPaid + totalRealizedPnl + totalUnrealizedPnl;
 
     // Update the run's current capital
     await updateRunCapital(run.run_id, realTimeCapital);
