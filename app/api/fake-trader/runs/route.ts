@@ -137,8 +137,9 @@ export async function DELETE(request: Request) {
 
 export async function GET(req: NextRequest) {
   try {
-    const query = `
-      SELECT 
+    // First get all runs
+    const runsQuery = `
+      SELECT
         run_id,
         name,
         symbols,
@@ -160,18 +161,39 @@ export async function GET(req: NextRequest) {
       ORDER BY created_at DESC
       LIMIT 50
     `;
-    
-    const result = await pool.query(query);
-    
-    const runs = result.rows.map(row => ({
-      ...row,
-      symbols: Array.isArray(row.symbols) ? row.symbols : [],
-      params: typeof row.params === 'string' ? JSON.parse(row.params) : row.params,
-      starting_capital: Number(row.starting_capital),
-      current_capital: Number(row.current_capital)
-    }));
 
-    return NextResponse.json({ runs });
+    const runsResult = await pool.query(runsQuery);
+
+    // For each run, calculate available funds (current_capital - margin invested in open positions)
+    const runsWithAvailableFunds = await Promise.all(
+      runsResult.rows.map(async (row) => {
+        const runId = row.run_id;
+
+        // Get margin invested in open positions for this run
+        const marginQuery = `
+          SELECT COALESCE(SUM(cost_basis), 0) as margin_invested
+          FROM ft_positions
+          WHERE run_id = $1 AND status = 'open'
+        `;
+
+        const marginResult = await pool.query(marginQuery, [runId]);
+        const marginInvested = Number(marginResult.rows[0].margin_invested);
+
+        const currentCapital = Number(row.current_capital);
+        const availableFunds = currentCapital - marginInvested;
+
+        return {
+          ...row,
+          symbols: Array.isArray(row.symbols) ? row.symbols : [],
+          params: typeof row.params === 'string' ? JSON.parse(row.params) : row.params,
+          starting_capital: Number(row.starting_capital),
+          current_capital: currentCapital,
+          available_funds: availableFunds
+        };
+      })
+    );
+
+    return NextResponse.json({ runs: runsWithAvailableFunds });
 
   } catch (error: any) {
     console.error('Fetch fake trading runs error:', error);

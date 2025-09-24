@@ -20,6 +20,7 @@ type FakeTradeRun = {
   status: string;
   starting_capital: number;
   current_capital: number;
+  available_funds: number;
   max_concurrent_positions: number;
   started_at: string;
   last_update: string;
@@ -479,13 +480,14 @@ export default function FakeTraderPage() {
                             {run.symbols.length} symbols • {run.strategy_name}
                           </div>
                           <div className="text-xs mt-1">
-                            <span className="text-sub">Capital: </span>
-                            <span className="font-medium">{formatCapital(run.current_capital)}</span>
+                            <span className="text-sub">Available: </span>
+                            <span className="font-medium">{formatCapital(run.available_funds)}</span>
+                            <span className="text-sub ml-2">Total: {formatCapital(run.current_capital)}</span>
                             <span className={clsx(
                               'ml-2 font-medium',
                               pnl >= 0 ? 'text-green-400' : 'text-red-400'
                             )}>
-                              {pnl >= 0 ? '+' : ''}{formatCapital(pnl)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%)
+                              {pnl >= 0 ? '+' : ''}{formatCapital(pnl)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
                             </span>
                           </div>
                         </div>
@@ -542,7 +544,16 @@ export default function FakeTraderPage() {
                                 </div>
                               </div>
                             )}
-                            
+
+                            {run.params && (
+                              <div>
+                                <span className="text-sub">Parameters:</span>
+                                <pre className="text-xs mt-1 bg-bg border border-border rounded p-2 overflow-x-auto max-h-32">
+                                  {JSON.stringify(run.params, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+
                             <div className="flex justify-end mt-4 pt-3 border-t border-border/50">
                               <button
                                 onClick={(e) => {
@@ -610,8 +621,9 @@ export default function FakeTraderPage() {
                           {formatTimestamp(run.started_at)}
                         </div>
                         <div className="text-xs mt-1">
-                          <span className="text-sub">Final: </span>
-                          <span className="font-medium">{formatCapital(run.current_capital)}</span>
+                          <span className="text-sub">Available: </span>
+                          <span className="font-medium">{formatCapital(run.available_funds)}</span>
+                          <span className="text-sub ml-2">Total: {formatCapital(run.current_capital)}</span>
                           <span className={clsx(
                             'ml-2 font-medium',
                             pnl >= 0 ? 'text-green-400' : 'text-red-400'
@@ -669,6 +681,15 @@ export default function FakeTraderPage() {
                                   </span>
                                 ))}
                               </div>
+                            </div>
+                          )}
+
+                          {run.params && (
+                            <div>
+                              <span className="text-sub">Parameters:</span>
+                              <pre className="text-xs mt-1 bg-bg border border-border rounded p-2 overflow-x-auto max-h-32">
+                                {JSON.stringify(run.params, null, 2)}
+                              </pre>
                             </div>
                           )}
 
