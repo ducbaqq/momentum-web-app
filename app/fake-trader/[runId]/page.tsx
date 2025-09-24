@@ -231,10 +231,13 @@ export default function FakeTraderDetailsPage() {
     return `$${capital.toLocaleString()}`;
   }
 
-  function calculatePnL(startingCapital: number, currentCapital: number) {
-    const pnl = currentCapital - startingCapital;
-    const pnlPercent = ((pnl / startingCapital) * 100);
-    return { pnl, pnlPercent };
+  function calculateTotalPnL() {
+    // Calculate total P&L as: sum of realized P&L from closed trades + unrealized P&L from open positions
+    const realizedPnl = closedTrades.reduce((sum, trade) => sum + trade.realized_pnl, 0);
+    const unrealizedPnl = openPositions.reduce((sum, position) => sum + position.unrealized_pnl, 0);
+    const totalPnl = realizedPnl + unrealizedPnl;
+    const pnlPercent = ((totalPnl / run.starting_capital) * 100);
+    return { pnl: totalPnl, pnlPercent };
   }
 
   function getDurationString(startTime: string, endTime?: string | null) {
@@ -268,7 +271,7 @@ export default function FakeTraderDetailsPage() {
     );
   }
 
-  const { pnl, pnlPercent } = calculatePnL(run.starting_capital, run.current_capital);
+  const { pnl, pnlPercent } = calculateTotalPnL();
   const openPositions = positions.filter(p => p.status === 'open');
   const closedTrades = trades.filter(t => t.status === 'closed');
 
