@@ -1,0 +1,93 @@
+# Hyperparameter Optimization Configuration
+# ================================
+
+# Data Configuration
+data:
+  # Path to your historical candle data (CSV format from web-app export)
+  path: "historical_data.csv"
+
+  # Trading symbol
+  symbol: "BTCUSDT"
+
+# Optimization Settings
+optimization:
+  # Number of optimization trials (higher = more thorough but slower)
+  n_trials: 100
+
+  # Number of parallel jobs (-1 = use all CPU cores)
+  n_jobs: -1
+
+  # Timeout in seconds (0 = no timeout)
+  timeout: 3600
+
+  # Random seed for reproducible results
+  seed: 42
+
+# Strategy Parameters (search bounds)
+parameters:
+  minRoc5m:
+    min: 0.1
+    max: 3.0
+    step: 0.1
+    description: "Minimum ROC threshold for entry (%)"
+
+  minVolMult:
+    min: 1.0
+    max: 5.0
+    step: 0.1
+    description: "Minimum volume multiplier"
+
+  maxSpreadBps:
+    min: 1
+    max: 20
+    step: 1
+    description: "Maximum spread filter (basis points)"
+
+  leverage:
+    min: 1
+    max: 20
+    step: 1
+    description: "Position leverage multiplier"
+
+  riskPct:
+    min: 5.0
+    max: 50.0
+    step: 5.0
+    description: "Risk percentage per trade (%)"
+
+  timeframe:
+    choices: ["5m", "15m"]
+    description: "Timeframe for ROC calculation"
+
+# Walk-Forward Validation
+validation:
+  # Number of validation splits
+  n_splits: 3
+
+  # Training/validation split ratio (0.7 = 70% training, 30% validation)
+  train_ratio: 0.7
+
+# Output Configuration
+output:
+  # Results file
+  results_file: "optimization_results.json"
+
+  # Visualization file
+  plot_file: "optimization_results.html"
+
+  # Log file
+  log_file: "optimization.log"
+
+# Risk Management (fixed during optimization)
+risk_management:
+  stop_loss_pct: 0.02    # 2% stop loss
+  take_profit_pct: 0.03  # 3% take profit
+  fee_bps: 4            # 0.04% per trade (round trip)
+  slippage_bps: 2       # 0.02% slippage
+
+# Objective Function Weights
+objective_weights:
+  sharpe_ratio: 0.5     # Risk-adjusted returns (primary)
+  win_rate: 0.3         # Win rate (secondary)
+  pnl: 0.2              # Total profit (tertiary)
+  drawdown_penalty: 0.5 # Penalty multiplier for drawdown
