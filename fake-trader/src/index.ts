@@ -4,10 +4,8 @@ import {
   testConnection,
   getActiveRuns,
   getCurrentCandles,
-  getCompleted15mCandles,
   getRecentCandles,
   getLivePrices,
-  hasNew15mCandles,
   getLastProcessedCandle,
   updateLastProcessedCandle,
   getCurrentPositions,
@@ -271,7 +269,6 @@ class FakeTrader {
     // If there are too many positions, it indicates a problem - don't spam logs
     const verboseLogging = positions.length <= 10;
     let updatedCount = 0;
-    let exitedCount = 0;
     
     for (const position of positions) {
       const livePrice = livePrices[position.symbol];
@@ -293,7 +290,6 @@ class FakeTrader {
       }
       
       // Check for stop loss / take profit triggers using live prices
-      const positionsBefore = positions.length;
       await this.checkExitConditions(run, position, livePrice);
       // Note: We can't accurately count exits here since checkExitConditions doesn't return status
     }
@@ -360,7 +356,6 @@ class FakeTrader {
       
       const realizedPnl = this.calculateRealizedPnL(position, currentPrice);
       const fees = position.size * currentPrice * 0.0004; // 0.04% fees
-      const positionValue = position.size * currentPrice; // Value received from closing position
       
       await closePosition(position.position_id, currentPrice, realizedPnl);
 

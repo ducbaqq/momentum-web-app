@@ -231,7 +231,7 @@ export default function FakeTraderDetailsPage() {
     return `$${capital.toLocaleString()}`;
   }
 
-  function calculateTotalPnL() {
+  function calculateTotalPnL(run: FakeTradeRun) {
     // Calculate total P&L as: sum of realized P&L from closed trades + unrealized P&L from open positions
     const realizedPnl = closedTrades.reduce((sum, trade) => sum + trade.realized_pnl, 0);
     const unrealizedPnl = openPositions.reduce((sum, position) => sum + position.unrealized_pnl, 0);
@@ -271,7 +271,7 @@ export default function FakeTraderDetailsPage() {
     );
   }
 
-  const { pnl, pnlPercent } = calculateTotalPnL();
+  const { pnl, pnlPercent } = calculateTotalPnL(run);
   const openPositions = positions.filter(p => p.status === 'open');
   const closedTrades = trades.filter(t => t.status === 'closed');
 
