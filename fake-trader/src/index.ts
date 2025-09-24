@@ -300,6 +300,23 @@ class FakeTrader {
     if (!verboseLogging) {
       console.log(`   ✅ Updated ${updatedCount} positions (logging reduced due to high position count)`);
     }
+
+    // Update run capital to include real-time unrealized P&L
+    await this.updateRunCapitalWithUnrealizedPnl(run);
+  }
+
+  private async updateRunCapitalWithUnrealizedPnl(run: FakeTradeRun) {
+    // Get all positions to calculate total margin and unrealized P&L
+    const positions = await getCurrentPositions(run.run_id);
+    const totalMarginInvested = positions.reduce((sum, pos) => sum + Number(pos.cost_basis), 0);
+    const totalUnrealizedPnl = positions.reduce((sum, pos) => sum + Number(pos.unrealized_pnl), 0);
+
+    // Real-time capital = starting capital - margin invested + unrealized P&L - accumulated fees
+    const realTimeCapital = Number(run.starting_capital) - totalMarginInvested + totalUnrealizedPnl;
+
+    // Update the run's current capital
+    await updateRunCapital(run.run_id, realTimeCapital);
+    run.current_capital = realTimeCapital; // Update local copy
   }
 
   private async checkExitConditions(run: FakeTradeRun, position: FakePosition, currentPrice: number) {
