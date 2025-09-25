@@ -72,9 +72,12 @@ export default function BacktestPage() {
     minRoc5m: (value: number) => value > 0 ? null : 'Min ROC must be greater than 0',
     minVolMult: (value: number) => value > 0 ? null : 'Min volume multiplier must be greater than 0',
     maxSpreadBps: (value: number) => value >= 0 ? null : 'Max spread must be non-negative',
+    leverage: (value: number) => value >= 1 && value <= 100 ? null : 'Leverage must be between 1 and 100',
+    riskPct: (value: number) => value > 0 && value <= 50 ? null : 'Risk per trade must be between 0 and 50%',
+    stopLossPct: (value: number) => value > 0 && value <= 20 ? null : 'Stop loss must be between 0 and 20%',
+    takeProfitPct: (value: number) => value > 0 && value <= 50 ? null : 'Take profit must be between 0 and 50%',
     feeBps: (value: number) => value >= 0 ? null : 'Fee must be non-negative',
     slippageBps: (value: number) => value >= 0 ? null : 'Slippage must be non-negative',
-    leverage: (value: number) => value >= 1 && value <= 100 ? null : 'Leverage must be between 1 and 100',
     symbols: (value: string[]) => value.length > 0 ? null : 'At least one symbol must be selected',
     startDate: (value: string) => value ? null : 'Start date is required',
     endDate: (value: string) => value ? null : 'End date is required',
@@ -92,10 +95,14 @@ export default function BacktestPage() {
     // Capital settings
     startingCapital: 1000,
 
-    // Momentum Breakout V2 Strategy parameters
-    minRoc5m: 0.5,
-    minVolMult: 2,
-    maxSpreadBps: 8,
+    // Momentum Breakout V2 Strategy parameters - OPTIMIZED DEFAULTS
+    minRoc5m: 0.306, // Optimized: 30.6% ROC threshold
+    minVolMult: 0.3,  // Optimized: 0.3x volume multiplier
+    maxSpreadBps: 25,  // Optimized: 25bps spread limit
+    leverage: 20,      // Optimized: 20x leverage
+    riskPct: 2.0,      // Optimized: 2% risk per trade
+    stopLossPct: 0.029, // Optimized: 2.9% stop loss
+    takeProfitPct: 0.025, // Optimized: 2.5% take profit
 
     // Execution parameters
     feeBps: 4,
@@ -289,7 +296,7 @@ export default function BacktestPage() {
 
     setLoading(true);
     try {
-      // Build momentum_breakout_v2 strategy parameters
+      // Build momentum_breakout_v2 strategy parameters - OPTIMIZED DEFAULTS
       let strategyParams: any = {
         maxSpreadBps: formData.maxSpreadBps,
         starting_capital: formData.startingCapital,
@@ -297,7 +304,10 @@ export default function BacktestPage() {
         slippageBps: formData.slippageBps,
         leverage: formData.leverage,
         minRoc5m: formData.minRoc5m,
-        minVolMult: formData.minVolMult
+        minVolMult: formData.minVolMult,
+        riskPct: formData.riskPct,
+        stopLossPct: formData.stopLossPct,
+        takeProfitPct: formData.takeProfitPct
       };
 
       const payload = {
@@ -606,13 +616,25 @@ export default function BacktestPage() {
               minRoc5m={formData.minRoc5m}
               minVolMult={formData.minVolMult}
               maxSpreadBps={formData.maxSpreadBps}
+              leverage={formData.leverage}
+              riskPct={formData.riskPct}
+              stopLossPct={formData.stopLossPct}
+              takeProfitPct={formData.takeProfitPct}
               onMinRoc5mChange={(value) => setFormData(prev => ({ ...prev, minRoc5m: value }))}
               onMinVolMultChange={(value) => setFormData(prev => ({ ...prev, minVolMult: value }))}
               onMaxSpreadBpsChange={(value) => setFormData(prev => ({ ...prev, maxSpreadBps: value }))}
+              onLeverageChange={(value) => setFormData(prev => ({ ...prev, leverage: value }))}
+              onRiskPctChange={(value) => setFormData(prev => ({ ...prev, riskPct: value }))}
+              onStopLossPctChange={(value) => setFormData(prev => ({ ...prev, stopLossPct: value }))}
+              onTakeProfitPctChange={(value) => setFormData(prev => ({ ...prev, takeProfitPct: value }))}
               validationErrors={{
                 minRoc5m: formValidation.errors.minRoc5m,
                 minVolMult: formValidation.errors.minVolMult,
-                maxSpreadBps: formValidation.errors.maxSpreadBps
+                maxSpreadBps: formValidation.errors.maxSpreadBps,
+                leverage: formValidation.errors.leverage,
+                riskPct: formValidation.errors.riskPct,
+                stopLossPct: formValidation.errors.stopLossPct,
+                takeProfitPct: formValidation.errors.takeProfitPct
               }}
             />
 

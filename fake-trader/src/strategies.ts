@@ -51,12 +51,14 @@ export function momentumBreakoutV2Strategy(
 ): TradeSignal[] {
   const signals: TradeSignal[] = [];
   
-  // Get required parameters
-  const minRocThreshold = params.minRoc5m !== undefined ? params.minRoc5m : 0.5; // Default to 0.5 (50%) instead of 1.2 (120%)
-  const minVolMult = params.minVolMult !== undefined ? params.minVolMult : 2;
-  const maxSpreadBps = params.maxSpreadBps !== undefined ? params.maxSpreadBps : 8;
-  const leverage = params.leverage || 1;
-  const riskPct = params.riskPct !== undefined ? params.riskPct : 20; // Risk percentage of equity per trade
+  // Get required parameters - OPTIMIZED DEFAULTS from hyperparameter optimization
+  const minRocThreshold = params.minRoc5m !== undefined ? params.minRoc5m : 0.306; // Optimized: 30.6% ROC threshold
+  const minVolMult = params.minVolMult !== undefined ? params.minVolMult : 0.3; // Optimized: 0.3x volume multiplier
+  const maxSpreadBps = params.maxSpreadBps !== undefined ? params.maxSpreadBps : 25; // Optimized: 25bps spread limit
+  const leverage = params.leverage || 20; // Optimized: 20x leverage
+  const riskPct = params.riskPct !== undefined ? params.riskPct : 2.0; // Optimized: 2% risk per trade
+  const stopLossPct = params.stopLossPct !== undefined ? params.stopLossPct : 0.029; // Optimized: 2.9% stop loss
+  const takeProfitPct = params.takeProfitPct !== undefined ? params.takeProfitPct : 0.025; // Optimized: 2.5% take profit
   const rsiExitLevel = 75;
   const timeframe = state.timeframe || '5m'; // Default to 5m for backward compatibility
 
@@ -104,8 +106,8 @@ export function momentumBreakoutV2Strategy(
         side: 'LONG',
         size: positionSize,
         type: 'MARKET',
-        stopLoss: candle.close * 0.98, // 2% stop loss
-        takeProfit: candle.close * 1.03, // 3% take profit
+        stopLoss: candle.close * (1.0 - stopLossPct), // Parameterized stop loss
+        takeProfit: candle.close * (1.0 + takeProfitPct), // Parameterized take profit
         leverage,
         reason: `momentum_breakout_v2_${timeframe}`
       });
