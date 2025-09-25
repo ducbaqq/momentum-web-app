@@ -107,7 +107,6 @@ export default function BacktestPage() {
     // Execution parameters
     feeBps: 4,
     slippageBps: 2,
-    leverage: 20,
   });
 
   async function fetchSymbols() {
