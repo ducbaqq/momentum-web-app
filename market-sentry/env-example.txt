@@ -1,0 +1,24 @@
+# Database Configuration for Hyperparameter Optimization
+# ====================================================
+
+# Your DATABASE_URL from your application
+# Format: postgresql://username:password@host[:port]/database
+DATABASE_URL="postgresql://myuser:mypassword@localhost:5432/mytradingdb"
+
+# Trading symbol to optimize (optional, defaults to BTCUSDT)
+SYMBOL="BTCUSDT"
+
+# Example URLs for different database providers:
+#
+# Local PostgreSQL:
+# DATABASE_URL="postgresql://postgres:mypassword@localhost:5432/trading_db"
+#
+# Neon (cloud PostgreSQL):
+# DATABASE_URL="postgresql://username:password@ep-cool-darkness-123456.us-east-1.aws.neon.tech/neondb"
+# DATABASE_URL="postgresql://neondb_owner:password@ep-dawn-band-pooler.eu-central-1.aws.neon.tech/neondb"
+#
+# Supabase:
+# DATABASE_URL="postgresql://postgres:[YOUR-PASSWORD]@db.xxx.supabase.co:5432/postgres"
+#
+# Railway:
+# DATABASE_URL="postgresql://postgres:xxx@containers-us-west-1.railway.app:xxx/railway"

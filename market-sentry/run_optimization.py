@@ -7,14 +7,20 @@ Loads configuration from config.yaml and runs the optimization.
 import yaml
 import sys
 import os
+import argparse
 from hyperparameter_optimizer import HyperparameterOptimizer
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run hyperparameter optimization')
+    parser.add_argument('--config', default='config.yaml', help='Path to config file')
+    args = parser.parse_args()
+
     # Load configuration
-    config_path = 'config.yaml'
+    config_path = args.config
     if not os.path.exists(config_path):
         print(f"Configuration file not found: {config_path}")
-        print("Please create config.yaml or modify the path in this script.")
+        print("Please create config.yaml or specify a different config file with --config")
         return 1
 
     with open(config_path, 'r') as f:
@@ -31,7 +37,8 @@ def main():
         # Initialize optimizer
         optimizer = HyperparameterOptimizer(
             data_path=data_path,
-            symbol=config['data']['symbol']
+            symbol=config['data']['symbol'],
+            config=config
         )
 
         # Run optimization
@@ -77,15 +84,13 @@ def main():
         print(f"Best Parameters: {results['best_params']}")
 
         bt = results['full_backtest']
-        print("
-Full Dataset Results:")
+        print("\nFull Dataset Results:")
         print(".2f")
         print(".1%")
         print(".2f")
 
         wf = results['walk_forward_validation']
-        print("
-Walk-Forward Validation:")
+        print("\nWalk-Forward Validation:")
         print(".2f")
         print(".1%")
 

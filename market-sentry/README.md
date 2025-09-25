@@ -13,13 +13,28 @@ pip install -r requirements.txt
 ### 2. Export Historical Data
 **Option A: Automated Export (Recommended)**
 ```bash
-# Set your database credentials
-export DATABASE_NAME="your_database"
-export DATABASE_HOST="localhost"
-export DATABASE_USER="your_username"
-export SYMBOL="BTCUSDT"
+# Set your database credentials (DATABASE_URL contains all connection info)
+export DATABASE_URL="postgresql://username:password@host:port/database"
+export SYMBOL="BTCUSDT"  # Optional, defaults to BTCUSDT
 
 # Run the export script (exports first 80% of your data for training)
+./export_data.sh
+```
+
+**Tip**: Copy `env-example.txt` to set your environment variables:
+```bash
+cp env-example.txt .env
+# Edit .env with your DATABASE_URL and SYMBOL
+# Example:
+#   DATABASE_URL="postgresql://user:pass@host/database"
+#   SYMBOL="SOLUSDT"
+
+source .env  # Load variables into environment
+
+# Optional: Check what data is available first
+./check_data.sh
+
+# Then export training data
 ./export_data.sh
 ```
 
@@ -60,7 +75,11 @@ optimization:
 
 ### 5. Run Optimization
 ```bash
-python run_optimization.py
+# Basic optimization with default config
+python3 run_optimization.py
+
+# Use custom config file
+python3 run_optimization.py --config my_custom_config.yaml
 ```
 
 ### 6. Review Results
@@ -96,12 +115,83 @@ The system optimizes these key parameters:
 
 | Parameter | Range | Description |
 |-----------|-------|-------------|
-| `minRoc5m` | 0.1% - 3.0% | Minimum momentum threshold for entry |
-| `minVolMult` | 1.0x - 5.0x | Minimum volume multiplier vs. average |
+| `minRoc5m` | 0.01% - 2.0% | Minimum momentum threshold for entry |
+| `minVolMult` | 1.0x - 3.0x | Minimum volume multiplier vs. average |
 | `maxSpreadBps` | 1-20 bps | Maximum bid-ask spread filter |
-| `leverage` | 1x - 20x | Position leverage multiplier |
+| `leverage` | 5x - 20x | Position leverage multiplier |
 | `riskPct` | 5% - 50% | Risk percentage per trade |
+| `stopLossPct` | 0.5% - 5.0% | Stop loss percentage |
+| `takeProfitPct` | 1.0% - 10.0% | Take profit percentage |
 | `timeframe` | 5m, 15m | ROC calculation timeframe |
+
+## 🎛️ Custom Parameter Bounds
+
+Edit the `parameters` section in `config.yaml` to customize search ranges for market-specific optimization:
+
+**Conservative Settings (Stable Markets):**
+```yaml
+parameters:
+  minRoc5m:
+    min: 0.1
+    max: 1.5
+  minVolMult:
+    min: 1.5
+    max: 3.0
+  leverage:
+    min: 5
+    max: 15
+  riskPct:
+    min: 5.0
+    max: 25.0
+```
+
+**Aggressive Settings (Volatile Markets):**
+```yaml
+parameters:
+  minRoc5m:
+    min: 0.5
+    max: 3.0
+  minVolMult:
+    min: 2.0
+    max: 5.0
+  leverage:
+    min: 15
+    max: 30
+  riskPct:
+    min: 20.0
+    max: 50.0
+```
+
+**Fine-tune Specific Parameters:**
+```yaml
+# Focus on leverage optimization
+parameters:
+  leverage:
+    min: 10
+    max: 25
+
+# Test different momentum sensitivities
+parameters:
+  minRoc5m:
+    min: 0.05
+    max: 2.5
+
+# Conservative volume filters only
+parameters:
+  minVolMult:
+    min: 2.0
+    max: 4.0
+```
+
+**Create Multiple Configs:**
+```bash
+# Copy config for different market conditions
+cp config.yaml config_conservative.yaml
+cp config.yaml config_aggressive.yaml
+
+# Edit each config with appropriate parameter ranges
+# Then run with: python3 run_optimization.py --config config_conservative.yaml
+```
 
 ## 📈 Performance Validation
 

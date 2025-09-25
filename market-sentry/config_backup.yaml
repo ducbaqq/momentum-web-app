@@ -4,7 +4,7 @@
 # Data Configuration
 data:
   # Path to your historical candle data (CSV format from web-app export)
-  path: "historical_data_clean.csv"
+  path: "historical_data.csv"
 
   # Trading symbol
   symbol: "BTCUSDT"
@@ -26,46 +26,34 @@ optimization:
 # Strategy Parameters (search bounds)
 parameters:
   minRoc5m:
-    min: 0.001  # ULTRA permissive: weakest possible momentum signals
-    max: 0.4    # Ultra permissive: maximum opportunity capture
-    step: 0.005 # Fine tuning for optimization
+    min: 0.1
+    max: 3.0
+    step: 0.1
     description: "Minimum ROC threshold for entry (%)"
 
   minVolMult:
-    min: 0.1    # ULTRA permissive: lowest possible volume requirements
-    max: 3.0    # Ultra permissive: capture all volume patterns
-    step: 0.1   # Standard tuning
+    min: 1.0
+    max: 5.0
+    step: 0.1
     description: "Minimum volume multiplier"
 
   maxSpreadBps:
-    min: 5      # More permissive spread requirements
-    max: 50     # Allow up to 50bps spread
-    step: 5     # Larger steps for spread
+    min: 1
+    max: 20
+    step: 1
     description: "Maximum spread filter (basis points)"
 
   leverage:
-    min: 8      # ULTRA aggressive: maximum leverage for maximum returns
-    max: 20     # Ultra aggressive: maximum leverage allowed
+    min: 1
+    max: 20
     step: 1
     description: "Position leverage multiplier"
 
   riskPct:
-    min: 0.05   # MAXIMUM aggressive: ultra minimum risk per trade (ultra maximum trades)
-    max: 2.0    # Maximum aggressive: higher risk tolerance
-    step: 0.05  # Fine tuning
+    min: 5.0
+    max: 50.0
+    step: 5.0
     description: "Risk percentage per trade (%)"
-
-  stopLossPct:
-    min: 0.5    # Tighter stops: cut losses quickly
-    max: 3.0    # Reasonable max stop loss
-    step: 0.2   # Fine tuning
-    description: "Stop loss percentage (%)"
-
-  takeProfitPct:
-    min: 2.0    # Wider targets: aim for better R:R ratios
-    max: 15.0   # Much wider profit targets
-    step: 0.5   # Fine tuning
-    description: "Take profit percentage (%)"
 
   timeframe:
     choices: ["5m", "15m"]
