@@ -54,7 +54,7 @@ export function momentumBreakoutV2Strategy(
   // Get required parameters - OPTIMIZED DEFAULTS from hyperparameter optimization
   // Note: Parameters can be whole percentages (e.g., 30 for 30%) or decimals (e.g., 0.3 for 30%)
   // Convert whole percentages (> 1) to decimals, leave decimals (< 1) as-is for backward compatibility
-  const minRocThreshold = params.minRoc5m !== undefined ? params.minRoc5m : 0.306; // Optimized: 30.6% ROC threshold
+  const minRocThreshold = params.minRoc5m !== undefined ? (params.minRoc5m > 1 ? params.minRoc5m / 100 : params.minRoc5m) : 0.306; // Convert whole % to decimal
   const minVolMult = params.minVolMult !== undefined ? params.minVolMult : 0.3; // Optimized: 0.3x volume multiplier
   const maxSpreadBps = params.maxSpreadBps !== undefined ? params.maxSpreadBps : 25; // Optimized: 25bps spread limit
   const leverage = params.leverage || 20; // Optimized: 20x leverage
