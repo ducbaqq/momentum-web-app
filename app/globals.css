@@ -1,9 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html,
-body {
-    background: #0b0e11;
-    color: #e6e6e6;
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-family: 'Inter', sans-serif;
+  }
+
+  body {
+    @apply bg-bg text-text;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+}
+
+@layer components {
+  /* Modern scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-card;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-border;
+  }
+
+  /* Focus styles */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-bg;
+  }
+
+  /* Card variants */
+  .card {
+    @apply bg-card border border-border rounded-xl p-6 shadow-md;
+  }
+
+  .card-hover {
+    @apply hover:bg-pill transition-colors duration-200;
+  }
+
+  /* Status badges */
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+
+  .status-active {
+    @apply bg-green-50 text-green-700 border border-green-200;
+  }
+
+  .status-paused {
+    @apply bg-yellow-50 text-yellow-700 border border-yellow-200;
+  }
+
+  .status-stopped {
+    @apply bg-gray-50 text-gray-700 border border-gray-200;
+  }
+
+  .status-error {
+    @apply bg-red-50 text-red-700 border border-red-200;
+  }
+
+  /* Trading indicators */
+  .profit-indicator {
+    @apply text-profit;
+  }
+
+  .loss-indicator {
+    @apply text-loss;
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    @apply bg-gray-200 animate-pulse rounded;
+  }
 }

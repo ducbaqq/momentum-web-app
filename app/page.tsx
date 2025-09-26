@@ -31,7 +31,6 @@ type Signal = {
   roc5m: string;
   vol: string;
   vol_avg: string;
-  vol_mult: string;
   book_imb: string;
   thresholds: Record<string, unknown> | null;
 };
@@ -78,6 +77,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [fieldConfigs, setFieldConfigs] = useState<Record<string, FieldConfig>>({});
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   async function fetchAll() {
@@ -90,15 +90,15 @@ export default function HomePage() {
       if (!lRes.ok) throw new Error('latest fetch failed');
       if (!sRes.ok) throw new Error('recent signals fetch failed');
       if (!symRes.ok) throw new Error('symbols fetch failed');
-      
+
       const lData = await lRes.json();
       const sData: Signal[] = await sRes.json();
       const symData = await symRes.json();
-      
+
       const availableSymbols = symData.symbols || [];
       const latestBySymbol: LatestTick[] = lData;
       const signalsBySymbol: Record<string, Signal | null> = {};
-      
+
       for (const sym of availableSymbols) {
         const found = sData.find((x) => x.symbol === sym) || null;
         signalsBySymbol[sym] = found;
@@ -127,7 +127,7 @@ export default function HomePage() {
       rocResults.forEach(roc => {
         rocBySymbol[roc.symbol] = roc;
       });
-      
+
       setSymbols(availableSymbols);
       setLatest(latestBySymbol);
       setSignals(signalsBySymbol);
@@ -135,6 +135,8 @@ export default function HomePage() {
       setError(null);
     } catch (e: any) {
       setError(e.message || 'Fetch error');
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -174,6 +176,45 @@ export default function HomePage() {
     return () => clearInterval(id);
   }, []);
 
+  // Loading skeleton for symbol cards
+  if (loading) {
+    return (
+      <main className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {[...Array(16)].map((_, i) => (
+            <div
+              key={i}
+              className="animate-pulse"
+              style={{
+                borderRadius: '0.75rem',
+                borderWidth: '1px',
+                borderColor: 'rgb(32 37 43 / var(--tw-border-opacity))',
+                backgroundColor: 'rgb(21 26 33 / var(--tw-bg-opacity))',
+                padding: '0.75rem',
+                borderStyle: 'solid',
+                boxSizing: 'border-box'
+              }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="skeleton h-4 w-16"></div>
+                <div className="skeleton h-4 w-12 rounded-full"></div>
+              </div>
+              <div className="skeleton h-6 w-20 mb-2"></div>
+              <div className="grid grid-cols-2 gap-y-2 text-sm">
+                {[...Array(6)].map((_, j) => (
+                  <div key={j} className="flex justify-between">
+                    <div className="skeleton h-3 w-12"></div>
+                    <div className="skeleton h-3 w-16"></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="space-y-4">
       {error && (
@@ -210,7 +251,7 @@ export default function HomePage() {
               recentSignal && 'ring-1 ring-green-500'
             )}>
               <div className="flex items-center justify-between mb-2">
-                <a 
+                <a
                   href={`https://www.binance.com/en/futures/${sym}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -234,7 +275,7 @@ export default function HomePage() {
                         <circle cx="14" cy="8" r="1.5"/>
                       </svg>
                     </button>
-                    
+
                     {openDropdown === sym && (
                       <div className="absolute right-0 top-8 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 w-48 py-2">
                         <div className="px-3 py-2 text-xs font-medium text-gray-300 border-b border-gray-600">
@@ -368,4 +409,3 @@ export default function HomePage() {
     </main>
   );
 }
-
