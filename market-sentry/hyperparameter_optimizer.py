@@ -703,6 +703,13 @@ class HyperparameterOptimizer:
                     consistency_bonus -
                     dd_penalty)
 
+        # Store trial data for enhanced visualization
+        trial.set_user_attr('win_rate', results['win_rate'])
+        trial.set_user_attr('total_pnl', results['total_pnl'])
+        trial.set_user_attr('sharpe_ratio', results['sharpe_ratio'])
+        trial.set_user_attr('max_drawdown', results['max_drawdown'])
+        trial.set_user_attr('total_trades', results['total_trades'])
+
         # Log trial results
         logger.info(f"Trial {trial.number}: "
                    f"Objective={objective:.3f}, "
@@ -816,13 +823,13 @@ class HyperparameterOptimizer:
         study = results['study']
         best_params = results['best_params']
 
-        # Create subplot figure
+        # Create subplot figure (2x3 layout for enhanced visualization)
         fig = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=('Parameter Importance', 'Optimization History',
-                          'Equity Curve', 'Trade Analysis'),
-            specs=[[{"type": "bar"}, {"type": "scatter"}],
-                   [{"type": "scatter"}, {"type": "bar"}]]
+            rows=2, cols=3,
+            subplot_titles=('Parameter Importance', 'Optimization History', 'Win Rate vs PnL',
+                          'Equity Curve', 'Trade Analysis', 'Risk-Return Analysis'),
+            specs=[[{"type": "bar"}, {"type": "scatter"}, {"type": "scatter"}],
+                   [{"type": "scatter"}, {"type": "bar"}, {"type": "scatter"}]]
         )
 
         # 1. Parameter Importance
@@ -874,11 +881,102 @@ class HyperparameterOptimizer:
             row=2, col=2
         )
 
-        # Update layout
+        # 5. Win Rate vs PnL Scatter Plot (NEW)
+        trials = study.trials
+        win_rates = []
+        pnl_values = []
+        sharpe_ratios = []
+
+        for trial in trials:
+            if trial.value is not None and hasattr(trial, 'user_attrs') and trial.user_attrs:
+                user_attrs = trial.user_attrs
+                if 'win_rate' in user_attrs and 'total_pnl' in user_attrs:
+                    win_rates.append(user_attrs['win_rate'])
+                    pnl_values.append(user_attrs['total_pnl'])
+                    sharpe_ratios.append(user_attrs.get('sharpe_ratio', 0))
+
+        if win_rates and pnl_values:
+            # Color by Sharpe ratio for risk-return insight
+            colors = sharpe_ratios if sharpe_ratios else ['blue'] * len(win_rates)
+            fig.add_trace(
+                go.Scatter(
+                    x=win_rates,
+                    y=pnl_values,
+                    mode='markers',
+                    marker=dict(
+                        size=8,
+                        color=sharpe_ratios,
+                        colorscale='Viridis',
+                        showscale=True,
+                        colorbar=dict(title="Sharpe Ratio", x=0.95),
+                        line=dict(width=1, color='DarkSlateGrey')
+                    ),
+                    name='Win Rate vs PnL',
+                    text=[f'Win Rate: {wr:.1%}<br>PnL: ${pnl:.0f}<br>Sharpe: {sr:.2f}'
+                          for wr, pnl, sr in zip(win_rates, pnl_values, sharpe_ratios)],
+                    hovertemplate='<b>%{text}</b><extra></extra>'
+                ),
+                row=1, col=3
+            )
+
+        # 6. Risk-Return Analysis (Sharpe vs Returns)
+        if pnl_values and sharpe_ratios:
+            fig.add_trace(
+                go.Scatter(
+                    x=pnl_values,
+                    y=sharpe_ratios,
+                    mode='markers',
+                    marker=dict(
+                        size=8,
+                        color=win_rates,
+                        colorscale='RdYlGn',
+                        showscale=True,
+                        colorbar=dict(title="Win Rate", x=0.95),
+                        line=dict(width=1, color='DarkSlateGrey')
+                    ),
+                    name='Risk-Return Analysis',
+                    text=[f'PnL: ${pnl:.0f}<br>Sharpe: {sr:.2f}<br>Win Rate: {wr:.1%}'
+                          for pnl, sr, wr in zip(pnl_values, sharpe_ratios, win_rates)],
+                    hovertemplate='<b>%{text}</b><extra></extra>'
+                ),
+                row=2, col=3
+            )
+
+        # Update layout for 2x3 grid
         fig.update_layout(
-            title=f'Hyperparameter Optimization Results - {self.symbol}',
+            title=f'Enhanced Hyperparameter Optimization Results - {self.symbol}',
             showlegend=True,
-            height=800
+            height=1100,  # Increased height for 2x3 layout and parameter box
+            width=1600,   # Increased width to accommodate parameter display
+            margin=dict(b=200)  # Add bottom margin for parameter annotation
+        )
+
+        # Update axes labels
+        fig.update_xaxes(title_text="Win Rate", row=1, col=3)
+        fig.update_yaxes(title_text="PnL ($)", row=1, col=3)
+
+        fig.update_xaxes(title_text="PnL ($)", row=2, col=3)
+        fig.update_yaxes(title_text="Sharpe Ratio", row=2, col=3)
+
+        # Add parameter display as annotations
+        param_text = f"""<b>🏆 Champion Parameters - {self.symbol}</b><br><br>
+<b>Entry:</b> ROC≥{best_params['minRoc5m']:.1%}, Vol≥{best_params['minVolMult']:.1f}x, Spread≤{best_params['maxSpreadBps']:.0f}bps<br>
+<b>Risk:</b> {best_params['leverage']:.0f}x leverage, {best_params['riskPct']:.1f}% risk/trade, SL:{best_params['stopLossPct']:.1f}%, TP:{best_params['takeProfitPct']:.1f}%<br>
+<b>Performance:</b> Win Rate {results['full_backtest']['win_rate']:.1%}, PnL ${results['full_backtest']['total_pnl']:.0f}, Sharpe {results['full_backtest']['sharpe_ratio']:.2f}"""
+
+        # Add parameter annotation below the plots
+        fig.add_annotation(
+            text=param_text,
+            xref="paper", yref="paper",
+            x=0.5, y=-0.15,  # Position below the plot area
+            showarrow=False,
+            align="center",
+            font=dict(size=11, family="Arial, sans-serif"),
+            bordercolor="black",
+            borderwidth=1,
+            borderpad=8,
+            bgcolor="white",
+            opacity=0.95
         )
 
         # Save interactive plot

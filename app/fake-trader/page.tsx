@@ -51,9 +51,9 @@ export default function FakeTraderPage() {
     minVolMult: (value: number) => value > 0 ? null : 'Min volume multiplier must be greater than 0',
     maxSpreadBps: (value: number) => value >= 0 ? null : 'Max spread must be non-negative',
     leverage: (value: number) => value >= 1 && value <= 100 ? null : 'Leverage must be between 1 and 100',
-    riskPct: (value: number) => value > 0 && value <= 50 ? null : 'Risk per trade must be between 0 and 50%',
-    stopLossPct: (value: number) => value > 0 && value <= 20 ? null : 'Stop loss must be between 0 and 20%',
-    takeProfitPct: (value: number) => value > 0 && value <= 50 ? null : 'Take profit must be between 0 and 50%',
+    riskPct: (value: number) => value > 0 && value <= 100 ? null : 'Risk per trade must be between 0 and 100%',
+    stopLossPct: (value: number) => value > 0 && value <= 50 ? null : 'Stop loss must be between 0 and 50%',
+    takeProfitPct: (value: number) => value > 0 && value <= 500 ? null : 'Take profit must be between 0 and 500%',
     feeBps: (value: number) => value >= 0 ? null : 'Fee must be non-negative',
     slippageBps: (value: number) => value >= 0 ? null : 'Slippage must be non-negative',
     symbols: (value: string[]) => value.length > 0 ? null : 'At least one symbol must be selected',
@@ -74,10 +74,10 @@ export default function FakeTraderPage() {
     minRoc5m: 0.306, // Optimized: 30.6% ROC threshold
     minVolMult: 0.3,  // Optimized: 0.3x volume multiplier
     maxSpreadBps: 25,  // Optimized: 25bps spread limit
-    leverage: 20,      // Optimized: 20x leverage
-    riskPct: 2.0,      // Optimized: 2% risk per trade
-    stopLossPct: 0.029, // Optimized: 2.9% stop loss
-    takeProfitPct: 0.025, // Optimized: 2.5% take profit
+    leverage: 19,      // Optimized: 19x leverage (from market-sentry)
+    riskPct: 2,        // Optimized: 2% risk per trade (enter as whole number)
+    stopLossPct: 1,    // Optimized: 1% stop loss (enter as whole number)
+    takeProfitPct: 15, // Optimized: 15% take profit (enter as whole number)
 
     // Execution parameters
     feeBps: 4,

@@ -52,13 +52,15 @@ export function momentumBreakoutV2Strategy(
   const signals: TradeSignal[] = [];
   
   // Get required parameters - OPTIMIZED DEFAULTS from hyperparameter optimization
+  // Note: Parameters can be whole percentages (e.g., 30 for 30%) or decimals (e.g., 0.3 for 30%)
+  // Convert whole percentages (> 1) to decimals, leave decimals (< 1) as-is for backward compatibility
   const minRocThreshold = params.minRoc5m !== undefined ? params.minRoc5m : 0.306; // Optimized: 30.6% ROC threshold
   const minVolMult = params.minVolMult !== undefined ? params.minVolMult : 0.3; // Optimized: 0.3x volume multiplier
   const maxSpreadBps = params.maxSpreadBps !== undefined ? params.maxSpreadBps : 25; // Optimized: 25bps spread limit
   const leverage = params.leverage || 20; // Optimized: 20x leverage
-  const riskPct = params.riskPct !== undefined ? params.riskPct : 2.0; // Optimized: 2% risk per trade
-  const stopLossPct = params.stopLossPct !== undefined ? params.stopLossPct : 0.029; // Optimized: 2.9% stop loss
-  const takeProfitPct = params.takeProfitPct !== undefined ? params.takeProfitPct : 0.025; // Optimized: 2.5% take profit
+  const riskPct = params.riskPct !== undefined ? (params.riskPct > 1 ? params.riskPct / 100 : params.riskPct) : 2.0; // Convert whole % to decimal
+  const stopLossPct = params.stopLossPct !== undefined ? (params.stopLossPct > 1 ? params.stopLossPct / 100 : params.stopLossPct) : 0.029; // Convert whole % to decimal
+  const takeProfitPct = params.takeProfitPct !== undefined ? (params.takeProfitPct > 1 ? params.takeProfitPct / 100 : params.takeProfitPct) : 0.025; // Convert whole % to decimal
   const rsiExitLevel = 75;
   const timeframe = state.timeframe || '5m'; // Default to 5m for backward compatibility
 

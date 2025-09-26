@@ -44,7 +44,7 @@ fi
 # Full period: Aug 11 - Sep 24, 2025 (~45 days)
 # Training: First 80% (~36 days) → Aug 11 - Sep 16, 2025
 TRAINING_START="2025-08-11 00:00:00+00"
-TRAINING_END="2025-09-16 00:00:00+00"
+TRAINING_END="2025-09-24 00:00:00+00"
 
 echo "Database: $DB_NAME"
 echo "Host: $DB_HOST:$DB_PORT"

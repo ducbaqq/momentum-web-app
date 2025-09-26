@@ -328,24 +328,41 @@ class FakeTrader {
   private async checkExitConditions(run: FakeTradeRun, position: FakePosition, currentPrice: number) {
     let shouldExit = false;
     let exitReason = '';
-    
+
     // Check time-based exit (close positions older than 24 hours)
     const hoursOpen = (new Date().getTime() - new Date(position.opened_at).getTime()) / (1000 * 60 * 60);
     if (hoursOpen > 24) {
       shouldExit = true;
       exitReason = 'time_based_exit';
     }
-    
+
+    // Check liquidation for highly leveraged positions (emergency exit)
+    // At high leverage, even small losses can be catastrophic
+    const unrealizedPnlPct = position.unrealized_pnl / position.cost_basis;
+    if (position.leverage >= 10) {
+      // For 10x+ leverage, liquidate if losses exceed 20% of cost basis
+      if (unrealizedPnlPct <= -0.20) {
+        shouldExit = true;
+        exitReason = 'liquidation_high_leverage_loss';
+      }
+    } else if (position.leverage >= 5) {
+      // For 5x+ leverage, liquidate if losses exceed 30% of cost basis
+      if (unrealizedPnlPct <= -0.30) {
+        shouldExit = true;
+        exitReason = 'liquidation_medium_leverage_loss';
+      }
+    }
+
     // Check stop loss
-    if (position.stop_loss && 
+    if (position.stop_loss &&
         ((position.side === 'LONG' && currentPrice <= position.stop_loss) ||
          (position.side === 'SHORT' && currentPrice >= position.stop_loss))) {
       shouldExit = true;
       exitReason = 'stop_loss_trigger';
     }
-    
+
     // Check take profit
-    if (position.take_profit && 
+    if (position.take_profit &&
         ((position.side === 'LONG' && currentPrice >= position.take_profit) ||
          (position.side === 'SHORT' && currentPrice <= position.take_profit))) {
       shouldExit = true;

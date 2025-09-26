@@ -132,12 +132,12 @@ export function MomentumBreakoutV2Params({
           )}
         </div>
         <div>
-          <label className="block text-xs text-sub mb-1">Risk per Trade (%) * <span className="text-xs opacity-70">(use . or , for decimals)</span></label>
+          <label className="block text-xs text-sub mb-1">Risk per Trade (%) * <span className="text-xs opacity-70">(enter as whole number, e.g., 2 for 2%)</span></label>
           <input
             type="number"
             step="0.1"
             min="0.1"
-            max="50"
+            max="100"
             className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
               validationErrors.riskPct ? 'border-red-500' : 'border-border'
             }`}
@@ -152,12 +152,12 @@ export function MomentumBreakoutV2Params({
 
       <div className="grid grid-cols-2 gap-3 mt-4">
         <div>
-          <label className="block text-xs text-sub mb-1">Stop Loss (%) * <span className="text-xs opacity-70">(use . or , for decimals)</span></label>
+          <label className="block text-xs text-sub mb-1">Stop Loss (%) * <span className="text-xs opacity-70">(enter as whole number, e.g., 3 for 3%)</span></label>
           <input
             type="number"
             step="0.1"
             min="0.1"
-            max="20"
+            max="50"
             className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
               validationErrors.stopLossPct ? 'border-red-500' : 'border-border'
             }`}
@@ -169,12 +169,12 @@ export function MomentumBreakoutV2Params({
           )}
         </div>
         <div>
-          <label className="block text-xs text-sub mb-1">Take Profit (%) * <span className="text-xs opacity-70">(use . or , for decimals)</span></label>
+          <label className="block text-xs text-sub mb-1">Take Profit (%) * <span className="text-xs opacity-70">(enter as whole number, e.g., 15 for 15%)</span></label>
           <input
             type="number"
             step="0.1"
             min="0.1"
-            max="50"
+            max="500"
             className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
               validationErrors.takeProfitPct ? 'border-red-500' : 'border-border'
             }`}
