@@ -31,6 +31,7 @@ type Signal = {
   roc5m: string;
   vol: string;
   vol_avg: string;
+  vol_mult: string;
   book_imb: string;
   thresholds: Record<string, unknown> | null;
 };
