@@ -458,13 +458,39 @@ class FakeTrader {
 
   private async executeEntrySignal(run: FakeTradeRun, signal: any, candle: Candle) {
     console.log(`     🎯 Entry Signal: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${candle.close} (${signal.reason})`);
-    
+
     try {
+      // Check if a trade already exists for this exact signal (prevent duplicates)
+      const existingTrades = await pool.query(`
+        SELECT trade_id FROM ft_trades
+        WHERE run_id = $1 AND symbol = $2 AND side = $3 AND entry_ts = $4
+      `, [run.run_id, signal.symbol, signal.side, new Date().toISOString()]);
+
+      if (existingTrades.rows.length > 0) {
+        console.log(`     🚫 Duplicate signal detected - trade already exists for ${signal.symbol} ${signal.side} at this timestamp`);
+
+        // Log the rejected signal
+        await logSignal({
+          run_id: run.run_id,
+          symbol: signal.symbol,
+          signal_type: 'entry',
+          side: signal.side,
+          size: signal.size,
+          price: signal.price,
+          candle_data: candle,
+          executed: false,
+          rejection_reason: 'duplicate_signal_already_processed',
+          signal_ts: new Date().toISOString()
+        });
+
+        return; // Exit early - don't create duplicate trade
+      }
+
       // Check position limits BEFORE executing
       const currentPositions = await getCurrentPositions(run.run_id);
       if (currentPositions.length >= run.max_concurrent_positions) {
         console.log(`     🚫 Position limit reached: ${currentPositions.length}/${run.max_concurrent_positions} - skipping signal`);
-        
+
         // Log the rejected signal
         await logSignal({
           run_id: run.run_id,
@@ -478,7 +504,7 @@ class FakeTrader {
           rejection_reason: `position_limit_reached_${currentPositions.length}_of_${run.max_concurrent_positions}`,
           signal_ts: new Date().toISOString()
         });
-        
+
         return; // Exit early - don't execute the signal
       }
       
