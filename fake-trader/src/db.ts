@@ -95,7 +95,20 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
     ORDER BY created_at DESC
   `;
   
+  console.log('[DB] Querying for active runs...');
   const result = await pool.query(query);
+  console.log(`[DB] Found ${result.rows.length} runs with status 'active' or 'winding_down'`);
+  
+  // Log all runs and their statuses for debugging
+  if (result.rows.length === 0) {
+    // Check if there are ANY runs at all
+    const allRunsQuery = await pool.query('SELECT run_id, name, status FROM ft_runs ORDER BY created_at DESC LIMIT 5');
+    console.log(`[DB] Total runs in database: ${allRunsQuery.rows.length}`);
+    if (allRunsQuery.rows.length > 0) {
+      console.log('[DB] Sample runs:', allRunsQuery.rows.map(r => `${r.run_id.substring(0, 8)}... - ${r.name || 'unnamed'} - status: ${r.status}`));
+    }
+  }
+  
   return result.rows.map(row => ({
     ...row,
     starting_capital: Number(row.starting_capital),
