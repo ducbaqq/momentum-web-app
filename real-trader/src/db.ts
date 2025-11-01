@@ -2,9 +2,10 @@ import { Pool } from 'pg';
 import type { RealTradeRun, RealTrade, RealPosition, RealSignal, Candle } from './types.js';
 
 // Initialize database connection
+// DigitalOcean managed PostgreSQL uses self-signed certificates
+// Set NODE_TLS_REJECT_UNAUTHORIZED=0 in environment to allow connections
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,

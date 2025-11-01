@@ -40,6 +40,7 @@ logs/
 *.db
 *.sqlite
 *.dump
+dump.sql
 
 # Temporary files
 *.tmp
@@ -59,6 +60,31 @@ coverage/
 # ESLint
 .eslintcache
 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# DigitalOcean deployment artifacts
+.do/
+
+# Diagnostic/utility scripts (one-time use)
+diagnose-*.js
+diagnose-*.sql
+kill-stuck-queries.sql
+check-symbol-data.js
+migrate-data-between-databases.js
+
+# Market data files (temporary)
+market-sentry/*.csv
+market-sentry/*.json
+market-sentry/*.html
+
+# Documentation (planning docs)
+REAL-TRADER-BATTLE-PLAN.md
+
 backtest-worker/dist
 fake-trader/dist
 real-trader/dist
+shared/dist

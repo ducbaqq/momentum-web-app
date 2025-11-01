@@ -3,6 +3,11 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 
+// Import reusable components
+import { SymbolSelector, TimeframeSelector, StartingCapitalInput, MomentumBreakoutV2Params, ExecutionSettings } from '@/components/forms';
+import { NotificationBanner } from '@/components/ui';
+import { useSymbolManagement, useFormValidation } from '@/components/hooks';
+
 type RealTradeRun = {
   run_id: string;
   name: string | null;
@@ -28,66 +33,72 @@ type RealTradeRun = {
 };
 
 export default function RealTraderPage() {
-  const [symbols, setSymbols] = useState<string[]>([]);
+  // Symbol management using custom hook
+  const symbolManager = useSymbolManagement();
+
   const [runs, setRuns] = useState<RealTradeRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [notification, setNotification] = useState<{type: 'success' | 'error' | 'warning', message: string} | null>(null);
+  const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{runId: string, name: string} | null>(null);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  // Form validation rules
+  const validationRules = {
+    name: (value: string) => value.trim() ? null : 'Real trader name is required',
+    startingCapital: (value: number) => value >= 1000 ? null : 'Minimum capital is $1,000',
+    maxConcurrentPositions: (value: number) => value > 0 && value <= 10 ? null : 'Max concurrent positions must be between 1 and 10',
+    minRoc5m: (value: number) => value > 0 ? null : 'Min ROC must be greater than 0',
+    minVolMult: (value: number) => value > 0 ? null : 'Min volume multiplier must be greater than 0',
+    maxSpreadBps: (value: number) => value >= 0 ? null : 'Max spread must be non-negative',
+    leverage: (value: number) => value >= 1 && value <= 100 ? null : 'Leverage must be between 1 and 100',
+    riskPct: (value: number) => value > 0 && value <= 100 ? null : 'Risk per trade must be between 0 and 100%',
+    stopLossPct: (value: number) => value > 0 && value <= 50 ? null : 'Stop loss must be between 0 and 50%',
+    takeProfitPct: (value: number) => value > 0 && value <= 500 ? null : 'Take profit must be between 0 and 500%',
+    feeBps: (value: number) => value >= 0 ? null : 'Fee must be non-negative',
+    slippageBps: (value: number) => value >= 0 ? null : 'Slippage must be non-negative',
+    symbols: (value: string[]) => value.length > 0 ? null : 'At least one symbol must be selected',
+    maxPositionSizeUsd: (value: number) => value > 0 ? null : 'Max position size must be greater than 0',
+    dailyLossLimitPct: (value: number) => value > 0 && value <= 100 ? null : 'Daily loss limit must be between 0 and 100%',
+    maxDrawdownPct: (value: number) => value > 0 && value <= 100 ? null : 'Max drawdown must be between 0 and 100%',
+  };
+
+  const formValidation = useFormValidation(validationRules);
 
   // Form state
   const [formData, setFormData] = useState({
     name: '',
-    selectedSymbols: [] as string[],
-    strategy: 'momentum_breakout_v2',
     timeframe: '15m',
-    
+
     // Capital settings
-    startingCapital: 1000, // Lower default for real trading
-    maxConcurrentPositions: 2, // More conservative
-    maxPositionSizeUsd: 200, // Conservative position size
-    
-    // Risk management
-    dailyLossLimitPct: 3.0, // Conservative daily loss limit
-    maxDrawdownPct: 8.0, // Conservative drawdown limit
-    
+    startingCapital: 1000,
+    maxConcurrentPositions: 2, // More conservative for real trading
+    maxPositionSizeUsd: 500, // Conservative position size for real trading
+
+    // Risk management (real trading specific)
+    dailyLossLimitPct: 5.0, // Conservative daily loss limit
+    maxDrawdownPct: 10.0, // Conservative drawdown limit
+
     // Environment
     testnet: true, // Always default to testnet for safety
-    
-    // Basic Strategy parameters (momentum_breakout_v2)
-    minRoc5m: 0.5,
-    minVolMult: 2,
-    maxSpreadBps: 8,
-    
-    // Risk Management
-    riskPerTrade: 0.25, // More conservative
-    atrPeriod: 14,
-    atrMultiplier: 2.0,
-    partialTakeLevel: 1.5,
-    partialTakePercent: 40,
-    trailAfterPartial: true,
-    
-    // Guards
-    minBookImbalance: 1.3,
-    avoidFundingMinute: true,
-    killSwitchPercent: 1.5,
-    
+
+    // Basic Strategy parameters (momentum_breakout_v2) - OPTIMIZED DEFAULTS
+    minRoc5m: 0.306, // Optimized: 30.6% ROC threshold
+    minVolMult: 0.3,  // Optimized: 0.3x volume multiplier
+    maxSpreadBps: 25,  // Optimized: 25bps spread limit
+    leverage: 19,      // Optimized: 19x leverage (from market-sentry)
+    riskPct: 1,        // Conservative: 1% risk per trade for real trading (enter as whole number)
+    stopLossPct: 2,    // Conservative: 2% stop loss for real trading (enter as whole number)
+    takeProfitPct: 10, // Conservative: 10% take profit for real trading (enter as whole number)
+
     // Execution parameters
     feeBps: 4,
-    slippageBps: 3,
-    leverage: 20,
+    slippageBps: 2,
   });
 
-  async function fetchSymbols() {
-    try {
-      const res = await fetch('/api/symbols', { cache: 'no-store' });
-      const data = await res.json();
-      setSymbols(data.symbols || []);
-    } catch (e) {
-      console.error('Failed to fetch symbols:', e);
-      setNotification({type: 'error', message: 'Failed to fetch symbols'});
-    }
-  }
+  // Symbol fetching is handled by useSymbolManagement hook
 
   async function fetchRuns() {
     try {
@@ -109,79 +120,13 @@ export default function RealTraderPage() {
     }
   }
 
-  function validateForm() {
-    const errors: Record<string, string> = {};
-
-    // Validate name
-    if (!formData.name.trim()) {
-      errors.name = 'Real trader name is required';
-    }
-
-    // Validate symbols selection
-    if (formData.selectedSymbols.length === 0) {
-      errors.symbols = 'At least one symbol must be selected';
-    }
-
-    // Validate starting capital
-    if (formData.startingCapital <= 0) {
-      errors.startingCapital = 'Starting capital must be greater than 0';
-    }
-    if (formData.startingCapital < 100) {
-      errors.startingCapital = 'Starting capital should be at least $100 for real trading';
-    }
-    if (formData.startingCapital > 100000) {
-      errors.startingCapital = 'Starting capital cannot exceed $100,000 for safety';
-    }
-
-    // Validate position size
-    if (formData.maxPositionSizeUsd <= 0) {
-      errors.maxPositionSizeUsd = 'Max position size must be greater than 0';
-    }
-    if (formData.maxPositionSizeUsd > formData.startingCapital) {
-      errors.maxPositionSizeUsd = 'Max position size cannot exceed starting capital';
-    }
-
-    // Validate risk limits
-    if (formData.dailyLossLimitPct <= 0 || formData.dailyLossLimitPct > 20) {
-      errors.dailyLossLimitPct = 'Daily loss limit must be between 0.1% and 20%';
-    }
-    if (formData.maxDrawdownPct <= 0 || formData.maxDrawdownPct > 50) {
-      errors.maxDrawdownPct = 'Max drawdown must be between 0.1% and 50%';
-    }
-
-    // Validate basic strategy parameters
-    if (formData.strategy === 'momentum_breakout_v2') {
-      if (formData.minRoc5m <= 0) {
-        errors.minRoc5m = 'Min ROC 5m must be greater than 0';
-      }
-      if (formData.minVolMult <= 0) {
-        errors.minVolMult = 'Min Vol Multiplier must be greater than 0';
-      }
-    }
-
-    // Validate common parameters
-    if (formData.maxSpreadBps < 0) {
-      errors.maxSpreadBps = 'Max Spread cannot be negative';
-    }
-
-    // Validate execution parameters
-    if (formData.leverage < 1) {
-      errors.leverage = 'Leverage must be at least 1';
-    }
-
-    // Safety check for mainnet
-    if (!formData.testnet) {
-      if (formData.startingCapital > 10000) {
-        errors.startingCapital = 'For mainnet trading, starting capital is limited to $10,000 for safety';
-      }
-    }
-
-    return errors;
-  }
 
   async function submitRealTrader() {
-    const errors = validateForm();
-    setValidationErrors(errors);
+    // Use the form validation hook
+    const errors = formValidation.validateAll({
+      ...formData,
+      symbols: symbolManager.selectedSymbols
+    });
 
     if (Object.keys(errors).length > 0) {
       return;
@@ -200,50 +145,32 @@ export default function RealTraderPage() {
       );
       
       if (!confirmed) {
-        setNotification({type: 'warning', message: 'Real trading cancelled for safety'});
+        setNotification({type: 'error', message: 'Real trading cancelled for safety'});
         return;
       }
     }
 
     setLoading(true);
     try {
-      // Build strategy-specific parameters
-      let strategyParams: any = {
-        maxSpreadBps: formData.maxSpreadBps,
-        feeBps: formData.feeBps,
-        slippageBps: formData.slippageBps,
-        leverage: formData.leverage
-      };
 
-      if (formData.strategy === 'momentum_breakout_v2') {
-        strategyParams = {
-          ...strategyParams,
-          minRoc5m: formData.minRoc5m,
-          minVolMult: formData.minVolMult
-        };
-      } else if (formData.strategy === 'regime_filtered_momentum') {
-        strategyParams = {
-          ...strategyParams,
-          // Risk Management
-          riskPerTrade: formData.riskPerTrade / 100, // Convert percentage to decimal
-          atrPeriod: formData.atrPeriod,
-          atrMultiplier: formData.atrMultiplier,
-          partialTakeLevel: formData.partialTakeLevel,
-          partialTakePercent: formData.partialTakePercent / 100,
-          trailAfterPartial: formData.trailAfterPartial,
-          
-          // Guards
-          minBookImbalance: formData.minBookImbalance,
-          avoidFundingMinute: formData.avoidFundingMinute,
-          killSwitchPercent: formData.killSwitchPercent / 100,
-        };
-      }
+      // Convert percentage parameters from whole numbers to decimals
+      const processedParams = {
+        minRoc5m: formData.minRoc5m > 1 ? formData.minRoc5m / 100 : formData.minRoc5m,
+        minVolMult: formData.minVolMult,
+        maxSpreadBps: formData.maxSpreadBps,
+        leverage: formData.leverage,
+        riskPct: formData.riskPct > 1 ? formData.riskPct / 100 : formData.riskPct,
+        stopLossPct: formData.stopLossPct > 1 ? formData.stopLossPct / 100 : formData.stopLossPct,
+        takeProfitPct: formData.takeProfitPct > 1 ? formData.takeProfitPct / 100 : formData.takeProfitPct,
+        feeBps: formData.feeBps,
+        slippageBps: formData.slippageBps
+      };
 
       const payload = {
         name: formData.name,
-        symbols: formData.selectedSymbols,
+        symbols: symbolManager.selectedSymbols,
         timeframe: formData.timeframe,
-        strategy_name: formData.strategy,
+        strategy_name: 'momentum_breakout_v2',
         strategy_version: '1.0',
         starting_capital: formData.startingCapital,
         max_concurrent_positions: formData.maxConcurrentPositions,
@@ -251,7 +178,7 @@ export default function RealTraderPage() {
         daily_loss_limit_pct: formData.dailyLossLimitPct,
         max_drawdown_pct: formData.maxDrawdownPct,
         testnet: formData.testnet,
-        params: strategyParams,
+        params: processedParams,
         seed: Math.floor(Math.random() * 1000000)
       };
 
@@ -318,22 +245,6 @@ export default function RealTraderPage() {
     }
   }
 
-  function toggleSymbol(symbol: string) {
-    setFormData(prev => ({
-      ...prev,
-      selectedSymbols: prev.selectedSymbols.includes(symbol)
-        ? prev.selectedSymbols.filter(s => s !== symbol)
-        : [...prev.selectedSymbols, symbol]
-    }));
-  }
-
-  function selectAllSymbols() {
-    setFormData(prev => ({ ...prev, selectedSymbols: symbols }));
-  }
-
-  function clearAllSymbols() {
-    setFormData(prev => ({ ...prev, selectedSymbols: [] }));
-  }
 
   function formatTimestamp(timestamp: string) {
     return new Date(timestamp).toLocaleString();
@@ -350,7 +261,6 @@ export default function RealTraderPage() {
   }
 
   useEffect(() => {
-    fetchSymbols();
     fetchRuns();
   }, []);
 
@@ -424,8 +334,7 @@ export default function RealTraderPage() {
         <div className={clsx(
           'p-4 rounded-lg border flex items-center justify-between',
           notification.type === 'success' && 'bg-green-500/10 border-green-500/20 text-green-400',
-          notification.type === 'error' && 'bg-red-500/10 border-red-500/20 text-red-400',
-          notification.type === 'warning' && 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'
+          notification.type === 'error' && 'bg-red-500/10 border-red-500/20 text-red-400'
         )}>
           <span className="text-sm">{notification.message}</span>
           <button
@@ -482,51 +391,61 @@ export default function RealTraderPage() {
               <input
                 type="text"
                 className={`w-full bg-bg border rounded px-3 py-2 ${
-                  validationErrors.name ? 'border-red-500' : 'border-border'
+                  formValidation.errors.name ? 'border-red-500' : 'border-border'
                 }`}
                 value={formData.name}
                 onChange={(e) => {
                   setFormData(prev => ({ ...prev, name: e.target.value }));
-                  if (validationErrors.name) {
-                    setValidationErrors(prev => ({ ...prev, name: '' }));
-                  }
                 }}
                 placeholder="Real trader name..."
               />
-              {validationErrors.name && (
-                <p className="text-red-500 text-xs mt-1">{validationErrors.name}</p>
+              {formValidation.errors.name && (
+                <p className="text-red-500 text-xs mt-1">{formValidation.errors.name}</p>
               )}
             </div>
 
+            {/* Symbol Selection */}
+            <SymbolSelector
+              symbols={symbolManager.symbols}
+              selectedSymbols={symbolManager.selectedSymbols}
+              onToggleSymbol={symbolManager.toggleSymbol}
+              onSelectAll={symbolManager.selectAllSymbols}
+              onClearAll={symbolManager.clearAllSymbols}
+              validationError={formValidation.errors.symbols}
+            />
+
+            {/* Timeframe Selection */}
+            <TimeframeSelector
+              value={formData.timeframe}
+              onChange={(timeframe) => setFormData(prev => ({ ...prev, timeframe }))}
+            />
+
             {/* Capital Settings */}
+            <StartingCapitalInput
+              value={formData.startingCapital}
+              onChange={(startingCapital) => setFormData(prev => ({ ...prev, startingCapital }))}
+              validationError={formValidation.errors.startingCapital}
+            />
+
+            {/* Max Concurrent Positions */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Starting Capital ($) *</label>
+                <label className="block text-sm font-medium mb-1">Max Concurrent Positions *</label>
                 <input
                   type="number"
-                  step="100"
-                  min="100"
-                  max={formData.testnet ? "100000" : "10000"}
+                  min="1"
+                  max="5"
                   className={`w-full bg-bg border rounded px-3 py-2 ${
-                    validationErrors.startingCapital ? 'border-red-500' : 'border-border'
+                    formValidation.errors.maxConcurrentPositions ? 'border-red-500' : 'border-border'
                   }`}
-                  value={formData.startingCapital}
-                  onChange={(e) => {
-                    setFormData(prev => ({ ...prev, startingCapital: parseFloat(e.target.value) || 0 }));
-                    if (validationErrors.startingCapital) {
-                      setValidationErrors(prev => ({ ...prev, startingCapital: '' }));
-                    }
-                  }}
-                  placeholder="1000"
+                  value={formData.maxConcurrentPositions}
+                  onChange={(e) => setFormData(prev => ({ ...prev, maxConcurrentPositions: parseInt(e.target.value) || 1 }))}
                 />
-                {validationErrors.startingCapital && (
-                  <p className="text-red-500 text-xs mt-1">{validationErrors.startingCapital}</p>
+                {formValidation.errors.maxConcurrentPositions && (
+                  <p className="text-red-500 text-xs mt-1">{formValidation.errors.maxConcurrentPositions}</p>
                 )}
-                <p className="text-xs text-sub mt-1">
-                  Minimum $100, Max: {formData.testnet ? '$100K (testnet)' : '$10K (mainnet)'}
-                </p>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium mb-1">Max Position Size ($) *</label>
                 <input
@@ -534,39 +453,22 @@ export default function RealTraderPage() {
                   step="50"
                   min="50"
                   className={`w-full bg-bg border rounded px-3 py-2 ${
-                    validationErrors.maxPositionSizeUsd ? 'border-red-500' : 'border-border'
+                    formValidation.errors.maxPositionSizeUsd ? 'border-red-500' : 'border-border'
                   }`}
                   value={formData.maxPositionSizeUsd}
-                  onChange={(e) => {
-                    setFormData(prev => ({ ...prev, maxPositionSizeUsd: parseFloat(e.target.value) || 0 }));
-                    if (validationErrors.maxPositionSizeUsd) {
-                      setValidationErrors(prev => ({ ...prev, maxPositionSizeUsd: '' }));
-                    }
-                  }}
-                  placeholder="200"
+                  onChange={(e) => setFormData(prev => ({ ...prev, maxPositionSizeUsd: parseFloat(e.target.value) || 0 }))}
+                  placeholder="500"
                 />
-                {validationErrors.maxPositionSizeUsd && (
-                  <p className="text-red-500 text-xs mt-1">{validationErrors.maxPositionSizeUsd}</p>
+                {formValidation.errors.maxPositionSizeUsd && (
+                  <p className="text-red-500 text-xs mt-1">{formValidation.errors.maxPositionSizeUsd}</p>
                 )}
-                <p className="text-xs text-sub mt-1">Per-position limit</p>
               </div>
             </div>
 
             {/* Risk Management */}
             <div className="border-t border-border pt-4">
               <h4 className="font-medium mb-3 text-orange-300">Risk Management</h4>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs text-sub mb-1">Max Positions *</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="5"
-                    className="w-full bg-bg border border-border rounded px-2 py-1 text-sm"
-                    value={formData.maxConcurrentPositions}
-                    onChange={(e) => setFormData(prev => ({ ...prev, maxConcurrentPositions: parseInt(e.target.value) || 0 }))}
-                  />
-                </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-sub mb-1">Daily Loss Limit (%) *</label>
                   <input
@@ -575,218 +477,76 @@ export default function RealTraderPage() {
                     min="0.1"
                     max="20"
                     className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                      validationErrors.dailyLossLimitPct ? 'border-red-500' : 'border-border'
+                      formValidation.errors.dailyLossLimitPct ? 'border-red-500' : 'border-border'
                     }`}
                     value={formData.dailyLossLimitPct}
-                    onChange={(e) => {
-                      setFormData(prev => ({ ...prev, dailyLossLimitPct: parseFloat(e.target.value) || 0 }));
-                      if (validationErrors.dailyLossLimitPct) {
-                        setValidationErrors(prev => ({ ...prev, dailyLossLimitPct: '' }));
-                      }
-                    }}
+                    onChange={(e) => setFormData(prev => ({ ...prev, dailyLossLimitPct: parseFloat(e.target.value) || 0 }))}
                   />
-                  {validationErrors.dailyLossLimitPct && (
-                    <p className="text-red-500 text-xs mt-1">{validationErrors.dailyLossLimitPct}</p>
+                  {formValidation.errors.dailyLossLimitPct && (
+                    <p className="text-red-500 text-xs mt-1">{formValidation.errors.dailyLossLimitPct}</p>
                   )}
                 </div>
                 <div>
                   <label className="block text-xs text-sub mb-1">Max Drawdown (%) *</label>
                   <input
                     type="number"
-                    step="1"
-                    min="1"
+                    step="0.5"
+                    min="0.1"
                     max="50"
                     className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                      validationErrors.maxDrawdownPct ? 'border-red-500' : 'border-border'
+                      formValidation.errors.maxDrawdownPct ? 'border-red-500' : 'border-border'
                     }`}
                     value={formData.maxDrawdownPct}
-                    onChange={(e) => {
-                      setFormData(prev => ({ ...prev, maxDrawdownPct: parseFloat(e.target.value) || 0 }));
-                      if (validationErrors.maxDrawdownPct) {
-                        setValidationErrors(prev => ({ ...prev, maxDrawdownPct: '' }));
-                      }
-                    }}
+                    onChange={(e) => setFormData(prev => ({ ...prev, maxDrawdownPct: parseFloat(e.target.value) || 0 }))}
                   />
-                  {validationErrors.maxDrawdownPct && (
-                    <p className="text-red-500 text-xs mt-1">{validationErrors.maxDrawdownPct}</p>
+                  {formValidation.errors.maxDrawdownPct && (
+                    <p className="text-red-500 text-xs mt-1">{formValidation.errors.maxDrawdownPct}</p>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Symbol Selection */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Symbols *</label>
-              <div className="flex gap-2 mb-2">
-                <button
-                  onClick={selectAllSymbols}
-                  className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded"
-                >
-                  Select All
-                </button>
-                <button
-                  onClick={clearAllSymbols}
-                  className="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-700 rounded"
-                >
-                  Clear All
-                </button>
-                <span className="text-xs text-sub self-center">
-                  ({formData.selectedSymbols.length} selected)
-                </span>
-              </div>
-              <div className={`grid grid-cols-3 gap-1 max-h-32 overflow-y-auto bg-bg border rounded p-2 ${
-                validationErrors.symbols ? 'border-red-500' : 'border-border'
-              }`}>
-                {symbols.map(symbol => (
-                  <label key={symbol} className="flex items-center text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.selectedSymbols.includes(symbol)}
-                      onChange={() => {
-                        toggleSymbol(symbol);
-                        if (validationErrors.symbols) {
-                          setValidationErrors(prev => ({ ...prev, symbols: '' }));
-                        }
-                      }}
-                      className="mr-1"
-                    />
-                    {symbol}
-                  </label>
-                ))}
-              </div>
-              {validationErrors.symbols && (
-                <p className="text-red-500 text-xs mt-1">{validationErrors.symbols}</p>
-              )}
-            </div>
-
-            {/* Strategy Selection */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Strategy</label>
-              <select
-                className="w-full bg-bg border border-border rounded px-3 py-2"
-                value={formData.strategy}
-                onChange={(e) => setFormData(prev => ({ ...prev, strategy: e.target.value }))}
-              >
-                <option value="momentum_breakout_v2">Momentum Breakout V2 (Professional)</option>
-                <option value="regime_filtered_momentum">Regime Filtered Momentum (Advanced)</option>
-              </select>
-            </div>
-
-            {/* Strategy Parameters - Simplified for real trading */}
-            {formData.strategy === 'momentum_breakout_v2' && (
-              <div className="border-t border-border pt-4">
-                <h4 className="font-medium mb-3">Strategy Parameters</h4>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs text-sub mb-1">Min ROC 5m (%) *</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.5"
-                      className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                        validationErrors.minRoc5m ? 'border-red-500' : 'border-border'
-                      }`}
-                      value={formData.minRoc5m}
-                      onChange={(e) => {
-                        setFormData(prev => ({ ...prev, minRoc5m: parseFloat(e.target.value) || 0 }));
-                        if (validationErrors.minRoc5m) {
-                          setValidationErrors(prev => ({ ...prev, minRoc5m: '' }));
-                        }
-                      }}
-                    />
-                    {validationErrors.minRoc5m && (
-                      <p className="text-red-500 text-xs mt-1">{validationErrors.minRoc5m}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs text-sub mb-1">Min Vol Multiplier *</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="1"
-                      className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                        validationErrors.minVolMult ? 'border-red-500' : 'border-border'
-                      }`}
-                      value={formData.minVolMult}
-                      onChange={(e) => {
-                        setFormData(prev => ({ ...prev, minVolMult: parseFloat(e.target.value) || 0 }));
-                        if (validationErrors.minVolMult) {
-                          setValidationErrors(prev => ({ ...prev, minVolMult: '' }));
-                        }
-                      }}
-                    />
-                    {validationErrors.minVolMult && (
-                      <p className="text-red-500 text-xs mt-1">{validationErrors.minVolMult}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs text-sub mb-1">Max Spread (bps)</label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      className="w-full bg-bg border border-border rounded px-2 py-1 text-sm"
-                      value={formData.maxSpreadBps}
-                      onChange={(e) => setFormData(prev => ({ ...prev, maxSpreadBps: parseFloat(e.target.value) || 0 }))}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Momentum Breakout V2 Parameters */}
+            <MomentumBreakoutV2Params
+              minRoc5m={formData.minRoc5m}
+              minVolMult={formData.minVolMult}
+              maxSpreadBps={formData.maxSpreadBps}
+              leverage={formData.leverage}
+              riskPct={formData.riskPct}
+              stopLossPct={formData.stopLossPct}
+              takeProfitPct={formData.takeProfitPct}
+              onMinRoc5mChange={(minRoc5m) => setFormData(prev => ({ ...prev, minRoc5m }))}
+              onMinVolMultChange={(minVolMult) => setFormData(prev => ({ ...prev, minVolMult }))}
+              onMaxSpreadBpsChange={(maxSpreadBps) => setFormData(prev => ({ ...prev, maxSpreadBps }))}
+              onLeverageChange={(leverage) => setFormData(prev => ({ ...prev, leverage }))}
+              onRiskPctChange={(riskPct) => setFormData(prev => ({ ...prev, riskPct }))}
+              onStopLossPctChange={(stopLossPct) => setFormData(prev => ({ ...prev, stopLossPct }))}
+              onTakeProfitPctChange={(takeProfitPct) => setFormData(prev => ({ ...prev, takeProfitPct }))}
+              validationErrors={{
+                minRoc5m: formValidation.errors.minRoc5m,
+                minVolMult: formValidation.errors.minVolMult,
+                maxSpreadBps: formValidation.errors.maxSpreadBps,
+                leverage: formValidation.errors.leverage,
+                riskPct: formValidation.errors.riskPct,
+                stopLossPct: formValidation.errors.stopLossPct,
+                takeProfitPct: formValidation.errors.takeProfitPct
+              }}
+            />
 
             {/* Execution Parameters */}
-            <div className="border-t border-border pt-4">
-              <h4 className="font-medium mb-3">Execution Settings</h4>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs text-sub mb-1">Fee (bps)</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    className="w-full bg-bg border border-border rounded px-2 py-1 text-sm"
-                    value={formData.feeBps}
-                    onChange={(e) => setFormData(prev => ({ ...prev, feeBps: parseFloat(e.target.value) || 0 }))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-sub mb-1">Slippage (bps)</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    className="w-full bg-bg border border-border rounded px-2 py-1 text-sm"
-                    value={formData.slippageBps}
-                    onChange={(e) => setFormData(prev => ({ ...prev, slippageBps: parseFloat(e.target.value) || 0 }))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-sub mb-1">Leverage *</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="1"
-                    max="20"
-                    className={`w-full bg-bg border rounded px-2 py-1 text-sm ${
-                      validationErrors.leverage ? 'border-red-500' : 'border-border'
-                    }`}
-                    value={formData.leverage}
-                    onChange={(e) => {
-                      setFormData(prev => ({ ...prev, leverage: parseFloat(e.target.value) || 1 }));
-                      if (validationErrors.leverage) {
-                        setValidationErrors(prev => ({ ...prev, leverage: '' }));
-                      }
-                    }}
-                  />
-                  {validationErrors.leverage && (
-                    <p className="text-red-500 text-xs mt-1">{validationErrors.leverage}</p>
-                  )}
-                  <p className="text-xs text-sub mt-1">
-                    Max: 20x
-                  </p>
-                </div>
-              </div>
-            </div>
+            <ExecutionSettings
+              feeBps={formData.feeBps}
+              slippageBps={formData.slippageBps}
+              leverage={formData.leverage}
+              onFeeBpsChange={(feeBps) => setFormData(prev => ({ ...prev, feeBps }))}
+              onSlippageBpsChange={(slippageBps) => setFormData(prev => ({ ...prev, slippageBps }))}
+              onLeverageChange={(leverage) => setFormData(prev => ({ ...prev, leverage }))}
+              validationErrors={{
+                feeBps: formValidation.errors.feeBps,
+                slippageBps: formValidation.errors.slippageBps,
+                leverage: formValidation.errors.leverage
+              }}
+            />
 
             <button
               onClick={submitRealTrader}
