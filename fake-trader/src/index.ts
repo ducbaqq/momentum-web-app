@@ -580,10 +580,13 @@ class FakeTrader {
     console.log(`     🎯 Entry Signal: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${candle.close} (${signal.reason})`);
     
     try {
-      // Check position limits BEFORE executing
+      // Check position limits BEFORE executing (check both legacy and canonical)
       const currentPositions = await getCurrentPositions(run.run_id);
-      if (currentPositions.length >= run.max_concurrent_positions) {
-        console.log(`     🚫 Position limit reached: ${currentPositions.length}/${run.max_concurrent_positions} - skipping signal`);
+      const currentPositionsV2 = await getOpenPositionsV2(run.run_id);
+      const totalPositions = Math.max(currentPositions.length, currentPositionsV2.length);
+      
+      if (totalPositions >= run.max_concurrent_positions) {
+        console.log(`     🚫 Position limit reached: ${totalPositions}/${run.max_concurrent_positions} - skipping signal`);
         
         // Log the rejected signal
         await logSignal({
@@ -595,7 +598,7 @@ class FakeTrader {
           price: signal.price,
           candle_data: candle,
           executed: false,
-          rejection_reason: `position_limit_reached_${currentPositions.length}_of_${run.max_concurrent_positions}`,
+          rejection_reason: `position_limit_reached_${totalPositions}_of_${run.max_concurrent_positions}`,
           signal_ts: new Date().toISOString()
         });
         
@@ -603,7 +606,6 @@ class FakeTrader {
       }
       
       // Check if there's already an open position for this symbol
-      const currentPositions = await getCurrentPositions(run.run_id);
       const existingPositionForSymbol = currentPositions.find(p => p.symbol === signal.symbol);
       
       // Also check PositionV2
