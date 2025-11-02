@@ -518,7 +518,7 @@ class FakeTrader {
       await updateRunCapital(run.run_id, newCapital);
       run.current_capital = newCapital; // Update local copy
       
-      // Create new trade and position
+      // Create new trade first, then position with trade_id link
       const tradeId = await createTrade({
         run_id: run.run_id,
         symbol: signal.symbol,
@@ -534,8 +534,9 @@ class FakeTrader {
         status: 'open'
       });
       
-      await createPosition({
+      const positionId = await createPosition({
         run_id: run.run_id,
+        trade_id: tradeId, // Link position to trade
         symbol: signal.symbol,
         side: signal.side,
         size: signal.size,
@@ -550,7 +551,7 @@ class FakeTrader {
         status: 'open'
       });
       
-      console.log(`     ✅ Opened ${signal.side} position: ${tradeId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
+      console.log(`     ✅ Opened ${signal.side} position: Trade ${tradeId.substring(0, 8)}... Position ${positionId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
       
       // Log successful signal execution
       await logSignal({
@@ -635,8 +636,9 @@ class FakeTrader {
           status: 'open'
         });
         
-        await createPosition({
+        const positionId = await createPosition({
           run_id: run.run_id,
+          trade_id: tradeId, // Link position to trade
           symbol: signal.symbol,
           side: signal.side,
           size: signal.size,
@@ -651,7 +653,7 @@ class FakeTrader {
           status: 'open'
         });
         
-        console.log(`     ✅ Opened ${signal.side} position: ${tradeId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
+        console.log(`     ✅ Opened ${signal.side} position: Trade ${tradeId.substring(0, 8)}... Position ${positionId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
         
       } else {
         // Exit signal - close existing position

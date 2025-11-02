@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS ft_equity (
 CREATE TABLE IF NOT EXISTS ft_positions (
     position_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id UUID NOT NULL REFERENCES ft_runs(run_id) ON DELETE CASCADE,
+    trade_id UUID REFERENCES ft_trades(trade_id) ON DELETE SET NULL,
     symbol TEXT NOT NULL,
     
     -- Position details
@@ -177,4 +178,5 @@ CREATE INDEX IF NOT EXISTS idx_ft_trades_entry_ts ON ft_trades(entry_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_ft_equity_run_ts ON ft_equity(run_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_ft_positions_run_symbol ON ft_positions(run_id, symbol);
 CREATE INDEX IF NOT EXISTS idx_ft_positions_status ON ft_positions(status);
+CREATE INDEX IF NOT EXISTS idx_ft_positions_trade_id ON ft_positions(trade_id);
 CREATE INDEX IF NOT EXISTS idx_ft_signals_run_ts ON ft_signals(run_id, signal_ts DESC);

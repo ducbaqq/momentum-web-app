@@ -73,6 +73,7 @@ export interface FakeTrade {
 export interface FakePosition {
   position_id: string;
   run_id: string;
+  trade_id?: string; // Link to the trade that created this position
   symbol: string;
   
   side: 'LONG' | 'SHORT';

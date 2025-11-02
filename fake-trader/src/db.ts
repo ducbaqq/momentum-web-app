@@ -503,6 +503,7 @@ export async function getCurrentPositions(runId: string): Promise<FakePosition[]
   const result = await pool.query(query, [runId]);
   return result.rows.map(row => ({
     ...row,
+    trade_id: row.trade_id || undefined,
     size: Number(row.size),
     entry_price: Number(row.entry_price),
     current_price: row.current_price ? Number(row.current_price) : undefined,
@@ -538,14 +539,14 @@ export async function createTrade(trade: Omit<FakeTrade, 'trade_id' | 'created_a
 export async function createPosition(position: Omit<FakePosition, 'position_id' | 'opened_at' | 'last_update'>): Promise<string> {
   const query = `
     INSERT INTO ft_positions (
-      run_id, symbol, side, size, entry_price, current_price,
+      run_id, trade_id, symbol, side, size, entry_price, current_price,
       unrealized_pnl, cost_basis, market_value, stop_loss, take_profit, leverage, status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     RETURNING position_id
   `;
   
   const values = [
-    position.run_id, position.symbol, position.side, position.size, position.entry_price, position.current_price,
+    position.run_id, position.trade_id || null, position.symbol, position.side, position.size, position.entry_price, position.current_price,
     position.unrealized_pnl, position.cost_basis, position.market_value, position.stop_loss, position.take_profit, 
     position.leverage, position.status
   ];
@@ -567,24 +568,49 @@ export async function updatePosition(positionId: string, currentPrice: number, u
 
 // Close position
 export async function closePosition(positionId: string, exitPrice: number, realizedPnl: number): Promise<void> {
-  const query = `
+  // First, get the trade_id from the position
+  const positionQuery = await pool.query(
+    'SELECT trade_id FROM ft_positions WHERE position_id = $1',
+    [positionId]
+  );
+  
+  if (positionQuery.rows.length === 0) {
+    throw new Error(`Position ${positionId} not found`);
+  }
+  
+  const tradeId = positionQuery.rows[0].trade_id;
+  
+  if (!tradeId) {
+    console.warn(`⚠️  Position ${positionId} has no trade_id. Using fallback matching.`);
+    // Fallback to old method if trade_id is missing
+    const updateTradeQuery = `
+      UPDATE ft_trades 
+      SET exit_ts = NOW(), exit_px = $2, realized_pnl = $3, status = 'closed'
+      WHERE run_id = (SELECT run_id FROM ft_positions WHERE position_id = $1)
+      AND symbol = (SELECT symbol FROM ft_positions WHERE position_id = $1)
+      AND status = 'open'
+      ORDER BY entry_ts DESC
+      LIMIT 1
+    `;
+    await pool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
+  } else {
+    // Use trade_id for precise matching
+    const updateTradeQuery = `
+      UPDATE ft_trades 
+      SET exit_ts = NOW(), exit_px = $2, realized_pnl = $3, status = 'closed'
+      WHERE trade_id = $1
+    `;
+    await pool.query(updateTradeQuery, [tradeId, exitPrice, realizedPnl]);
+  }
+  
+  // Update position status
+  const updatePositionQuery = `
     UPDATE ft_positions 
     SET status = 'closed', current_price = $2, last_update = NOW()
     WHERE position_id = $1
   `;
   
-  await pool.query(query, [positionId, exitPrice]);
-  
-  // Also update the corresponding trade
-  const updateTradeQuery = `
-    UPDATE ft_trades 
-    SET exit_ts = NOW(), exit_px = $2, realized_pnl = $3, status = 'closed'
-    WHERE run_id = (SELECT run_id FROM ft_positions WHERE position_id = $1)
-    AND symbol = (SELECT symbol FROM ft_positions WHERE position_id = $1)
-    AND status = 'open'
-  `;
-  
-  await pool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
+  await pool.query(updatePositionQuery, [positionId, exitPrice]);
 }
 
 // Log strategy signal
