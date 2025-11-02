@@ -16,6 +16,15 @@ type FakeTradeRun = {
   status: string;
   starting_capital: number;
   current_capital: number;
+  equity?: number;
+  cash?: number;
+  available_funds?: number;
+  margin_used?: number;
+  realized_pnl?: number;
+  unrealized_pnl?: number;
+  total_pnl?: number;
+  total_fees?: number;
+  open_positions_count?: number;
   max_concurrent_positions: number;
   started_at: string;
   last_update: string;
@@ -29,18 +38,18 @@ type FakePosition = {
   run_id: string;
   symbol: string;
   side: string;
+  status: string;
   size: number;
-  entry_price: number;
-  current_price: number;
+  entry_price: number | undefined;
+  current_price: number | undefined;
   unrealized_pnl: number;
   cost_basis: number;
-  market_value: number;
-  stop_loss: number | null;
-  take_profit: number | null;
+  market_value: number | undefined;
   leverage: number;
-  status: string;
   opened_at: string;
-  closed_at: string | null;
+  closed_at: string | undefined;
+  fees_total: number;
+  realized_pnl: number;
 };
 
 type FakeTrade = {
@@ -232,13 +241,29 @@ export default function FakeTraderDetailsPage() {
   }
 
   function calculateTotalPnL(run: FakeTradeRun, allTrades: FakeTrade[], openPositions: FakePosition[]) {
-    // Calculate total P&L as: sum of realized P&L from closed trades + unrealized P&L from open positions - all fees
+    // Use new fields from API if available (preferred)
+    if (run.realized_pnl !== undefined && run.unrealized_pnl !== undefined) {
+      const totalPnl = run.realized_pnl + run.unrealized_pnl;
+      const pnlPercent = ((totalPnl / run.starting_capital) * 100);
+      return { 
+        pnl: totalPnl, 
+        pnlPercent,
+        realizedPnl: run.realized_pnl,
+        unrealizedPnl: run.unrealized_pnl
+      };
+    }
+    
+    // Fallback: Calculate from trades and positions
     const realizedPnl = allTrades.filter(t => t.status === 'closed').reduce((sum, trade) => sum + trade.realized_pnl, 0);
     const unrealizedPnl = openPositions.reduce((sum, position) => sum + position.unrealized_pnl, 0);
-    const totalFees = allTrades.reduce((sum, trade) => sum + trade.fees, 0);
-    const totalPnl = realizedPnl + unrealizedPnl - totalFees;
+    const totalPnl = realizedPnl + unrealizedPnl;
     const pnlPercent = ((totalPnl / run.starting_capital) * 100);
-    return { pnl: totalPnl, pnlPercent };
+    return { 
+      pnl: totalPnl, 
+      pnlPercent,
+      realizedPnl,
+      unrealizedPnl
+    };
   }
 
   function getDurationString(startTime: string, endTime?: string | null) {
@@ -272,13 +297,15 @@ export default function FakeTraderDetailsPage() {
     );
   }
 
-  const openPositions = positions.filter(p => p.status === 'open');
+  const openPositions = positions.filter(p => p.status === 'open' || p.status === 'NEW' || p.status === 'OPEN');
   const closedTrades = trades.filter(t => t.status === 'closed');
-  const { pnl, pnlPercent } = calculateTotalPnL(run, trades, openPositions);
+  const { pnl, pnlPercent, realizedPnl, unrealizedPnl } = calculateTotalPnL(run, trades, openPositions);
 
-  // Calculate available funds (current capital - margin invested in open positions)
-  const marginInvested = openPositions.reduce((sum, pos) => sum + pos.cost_basis, 0);
-  const availableFunds = run.current_capital - marginInvested;
+  // Use account snapshot data if available
+  const equity = run.equity ?? run.current_capital;
+  const cash = run.cash ?? (run.available_funds ?? run.current_capital);
+  const marginUsed = run.margin_used ?? 0;
+  const availableFunds = cash;
 
   return (
     <main className="p-6 space-y-6">
@@ -383,15 +410,21 @@ export default function FakeTraderDetailsPage() {
             </div>
           </div>
           <div className="text-center">
-            <div className="text-sub text-sm">Current P&L</div>
+            <div className="text-sub text-sm">Total P&L</div>
             <div className={clsx("text-3xl font-bold", pnl >= 0 ? "text-good" : "text-bad")}>
               {pnl >= 0 ? '+' : ''}{formatCapital(pnl)}
             </div>
+            <div className="text-xs text-sub mt-1">
+              ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
+            </div>
           </div>
           <div className="text-center">
-            <div className="text-sub text-sm">Total Value</div>
-            <div className={clsx("text-3xl font-bold", run.current_capital >= run.starting_capital ? "text-good" : "text-bad")}>
-              {formatCapital(run.current_capital)}
+            <div className="text-sub text-sm">Total Equity</div>
+            <div className={clsx("text-3xl font-bold", equity >= run.starting_capital ? "text-good" : "text-bad")}>
+              {formatCapital(equity)}
+            </div>
+            <div className="text-xs text-sub mt-1">
+              {marginUsed > 0 && `Margin: ${formatCapital(marginUsed)}`}
             </div>
           </div>
           <div className="text-center">
@@ -401,13 +434,25 @@ export default function FakeTraderDetailsPage() {
             </div>
           </div>
         </div>
-        <div className="mt-4 text-center">
-          <div className="text-sm text-sub">
-            Return: <span className={clsx("font-medium", pnlPercent >= 0 ? "text-good" : "text-bad")}>
-              {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
-            </span>
+        <div className="mt-4 grid grid-cols-2 gap-4 text-center">
+          <div>
+            <div className="text-xs text-sub">Realized P&L</div>
+            <div className={clsx("text-lg font-medium", realizedPnl >= 0 ? "text-good" : "text-bad")}>
+              {realizedPnl >= 0 ? '+' : ''}{formatCapital(realizedPnl)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-sub">Unrealized P&L</div>
+            <div className={clsx("text-lg font-medium", unrealizedPnl >= 0 ? "text-good" : "text-bad")}>
+              {unrealizedPnl >= 0 ? '+' : ''}{formatCapital(unrealizedPnl)}
+            </div>
           </div>
         </div>
+        {run.total_fees !== undefined && run.total_fees > 0 && (
+          <div className="mt-2 text-center text-xs text-sub">
+            Total Fees: {formatCapital(run.total_fees)}
+          </div>
+        )}
       </div>
 
       {/* Basic Information */}
@@ -496,13 +541,13 @@ export default function FakeTraderDetailsPage() {
                         {position.side}
                       </span>
                     </td>
-                    <td className="text-right py-3">{position.size.toFixed(4)}</td>
-                    <td className="text-right py-3">${position.entry_price.toFixed(2)}</td>
-                    <td className="text-right py-3">${position.current_price.toFixed(2)}</td>
-                    <td className={clsx("text-right py-3 font-medium", position.unrealized_pnl >= 0 ? "text-good" : "text-bad")}>
-                      ${position.unrealized_pnl.toFixed(2)}
-                    </td>
-                    <td className="text-right py-3">{formatTimestamp(position.opened_at)}</td>
+                      <td className="text-right py-3">{position.size.toFixed(4)}</td>
+                      <td className="text-right py-3">${position.entry_price?.toFixed(2) || 'N/A'}</td>
+                      <td className="text-right py-3">${position.current_price?.toFixed(2) || 'N/A'}</td>
+                      <td className={clsx("text-right py-3 font-medium", position.unrealized_pnl >= 0 ? "text-good" : "text-bad")}>
+                        ${position.unrealized_pnl.toFixed(2)}
+                      </td>
+                      <td className="text-right py-3">{formatTimestamp(position.opened_at)}</td>
                   </tr>
                 ))}
               </tbody>

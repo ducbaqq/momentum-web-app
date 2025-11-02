@@ -21,6 +21,13 @@ type FakeTradeRun = {
   starting_capital: number;
   current_capital: number;
   available_funds: number;
+  equity?: number;
+  cash?: number;
+  margin_used?: number;
+  realized_pnl?: number;
+  unrealized_pnl?: number;
+  total_pnl?: number;
+  open_positions_count?: number;
   max_concurrent_positions: number;
   started_at: string;
   last_update: string;
@@ -216,10 +223,17 @@ export default function FakeTraderPage() {
     return `$${capital.toLocaleString()}`;
   }
 
-  function calculatePnL(startingCapital: number, currentCapital: number) {
+  function calculatePnL(startingCapital: number, currentCapital: number, realizedPnl?: number, unrealizedPnl?: number) {
+    // Use new fields if available, otherwise fall back to old calculation
+    if (realizedPnl !== undefined && unrealizedPnl !== undefined) {
+      const totalPnl = realizedPnl + unrealizedPnl;
+      const pnlPercent = ((totalPnl / startingCapital) * 100);
+      return { pnl: totalPnl, pnlPercent, realizedPnl, unrealizedPnl };
+    }
+    // Fallback to old calculation
     const pnl = currentCapital - startingCapital;
     const pnlPercent = ((pnl / startingCapital) * 100);
-    return { pnl, pnlPercent };
+    return { pnl, pnlPercent, realizedPnl: pnl, unrealizedPnl: 0 };
   }
 
   async function deleteFakeTraderRun(runId: string) {
@@ -459,7 +473,15 @@ export default function FakeTraderPage() {
             {activeRuns.length > 0 ? (
               <div className="space-y-2">
                 {activeRuns.map(run => {
-                  const { pnl, pnlPercent } = calculatePnL(run.starting_capital, run.current_capital);
+                  const { pnl, pnlPercent, realizedPnl, unrealizedPnl } = calculatePnL(
+                    run.starting_capital, 
+                    run.current_capital,
+                    run.realized_pnl,
+                    run.unrealized_pnl
+                  );
+                  const equity = run.equity ?? run.current_capital;
+                  const cash = run.cash ?? run.available_funds;
+                  const marginUsed = run.margin_used ?? 0;
                   return (
                     <div
                       key={run.run_id}
@@ -481,8 +503,11 @@ export default function FakeTraderPage() {
                           </div>
                           <div className="text-xs mt-1">
                             <span className="text-sub">Available: </span>
-                            <span className="font-medium">{formatCapital(run.available_funds)}</span>
-                            <span className="text-sub ml-2">Total: {formatCapital(run.current_capital)}</span>
+                            <span className="font-medium">{formatCapital(cash)}</span>
+                            <span className="text-sub ml-2">Equity: {formatCapital(equity)}</span>
+                            {marginUsed > 0 && (
+                              <span className="text-sub ml-2">Margin: {formatCapital(marginUsed)}</span>
+                            )}
                             <span className={clsx(
                               'ml-2 font-medium',
                               pnl >= 0 ? 'text-green-400' : 'text-red-400'
@@ -490,6 +515,17 @@ export default function FakeTraderPage() {
                               {pnl >= 0 ? '+' : ''}{formatCapital(pnl)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
                             </span>
                           </div>
+                          {(realizedPnl !== undefined || unrealizedPnl !== undefined) && (
+                            <div className="text-xs mt-1 text-sub">
+                              Realized: <span className={clsx(realizedPnl && realizedPnl >= 0 ? 'text-green-400' : 'text-red-400')}>
+                                {realizedPnl !== undefined ? formatCapital(realizedPnl) : '$0'}
+                              </span>
+                              {' • '}
+                              Unrealized: <span className={clsx(unrealizedPnl && unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400')}>
+                                {unrealizedPnl !== undefined ? formatCapital(unrealizedPnl) : '$0'}
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <div className="flex flex-col gap-1">
                           <span className="px-2 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400">
@@ -599,7 +635,15 @@ export default function FakeTraderPage() {
             {inactiveRuns.length > 0 ? (
               <div className="space-y-2 flex-1 overflow-y-auto">
                 {inactiveRuns.map(run => {
-                const { pnl, pnlPercent } = calculatePnL(run.starting_capital, run.current_capital);
+                const { pnl, pnlPercent, realizedPnl, unrealizedPnl } = calculatePnL(
+                  run.starting_capital,
+                  run.current_capital,
+                  run.realized_pnl,
+                  run.unrealized_pnl
+                );
+                const equity = run.equity ?? run.current_capital;
+                const cash = run.cash ?? run.available_funds;
+                const marginUsed = run.margin_used ?? 0;
                 return (
                   <div
                     key={run.run_id}
@@ -622,8 +666,11 @@ export default function FakeTraderPage() {
                         </div>
                         <div className="text-xs mt-1">
                           <span className="text-sub">Available: </span>
-                          <span className="font-medium">{formatCapital(run.available_funds)}</span>
-                          <span className="text-sub ml-2">Total: {formatCapital(run.current_capital)}</span>
+                          <span className="font-medium">{formatCapital(cash)}</span>
+                          <span className="text-sub ml-2">Equity: {formatCapital(equity)}</span>
+                          {marginUsed > 0 && (
+                            <span className="text-sub ml-2">Margin: {formatCapital(marginUsed)}</span>
+                          )}
                           <span className={clsx(
                             'ml-2 font-medium',
                             pnl >= 0 ? 'text-green-400' : 'text-red-400'
@@ -631,6 +678,17 @@ export default function FakeTraderPage() {
                             {pnl >= 0 ? '+' : ''}{formatCapital(pnl)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%)
                           </span>
                         </div>
+                        {(realizedPnl !== undefined || unrealizedPnl !== undefined) && (
+                          <div className="text-xs mt-1 text-sub">
+                            Realized: <span className={clsx(realizedPnl && realizedPnl >= 0 ? 'text-green-400' : 'text-red-400')}>
+                              {realizedPnl !== undefined ? formatCapital(realizedPnl) : '$0'}
+                            </span>
+                            {' • '}
+                            Unrealized: <span className={clsx(unrealizedPnl && unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400')}>
+                              {unrealizedPnl !== undefined ? formatCapital(unrealizedPnl) : '$0'}
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div className="flex flex-col gap-1">
                         <span className={clsx(

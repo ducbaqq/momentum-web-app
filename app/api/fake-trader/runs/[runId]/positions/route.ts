@@ -10,44 +10,82 @@ export async function GET(
   try {
     const { runId } = params;
 
+    // Get open positions from ft_positions_v2
     const query = `
       SELECT 
         position_id,
         run_id,
         symbol,
         side,
-        size,
-        entry_price,
-        current_price,
-        unrealized_pnl,
+        status,
+        open_ts,
+        close_ts,
+        entry_price_vwap,
+        exit_price_vwap,
+        quantity_open,
+        quantity_close,
         cost_basis,
-        market_value,
-        stop_loss,
-        take_profit,
-        leverage,
-        opened_at,
-        last_update,
-        status
-      FROM ft_positions 
-      WHERE run_id = $1 AND status = 'open'
-      ORDER BY opened_at DESC
+        fees_total,
+        realized_pnl,
+        leverage_effective
+      FROM ft_positions_v2 
+      WHERE run_id = $1 AND status IN ('NEW', 'OPEN')
+      ORDER BY open_ts DESC
     `;
     
     const result = await pool.query(query, [runId]);
     
-    // Convert numeric fields to proper numbers
-    const positions = result.rows.map(row => ({
-      ...row,
-      size: Number(row.size),
-      entry_price: Number(row.entry_price),
-      current_price: row.current_price ? Number(row.current_price) : undefined,
-      unrealized_pnl: Number(row.unrealized_pnl),
-      cost_basis: Number(row.cost_basis),
-      market_value: row.market_value ? Number(row.market_value) : undefined,
-      stop_loss: row.stop_loss ? Number(row.stop_loss) : undefined,
-      take_profit: row.take_profit ? Number(row.take_profit) : undefined,
-      leverage: Number(row.leverage),
-    }));
+    // Get latest prices for unrealized PnL calculation
+    const symbols = result.rows.map((r: any) => r.symbol);
+    let priceMap: Record<string, number> = {};
+    
+    if (symbols.length > 0) {
+      const priceQuery = `
+        SELECT DISTINCT ON (symbol) symbol, close as price
+        FROM ohlcv_1m
+        WHERE symbol = ANY($1)
+        ORDER BY symbol, ts DESC
+      `;
+      const priceResult = await pool.query(priceQuery, [symbols]);
+      priceMap = Object.fromEntries(
+        priceResult.rows.map((r: any) => [r.symbol, Number(r.price)])
+      );
+    }
+    
+    // Convert numeric fields and calculate unrealized PnL
+    const positions = result.rows.map((row: any) => {
+      const currentPrice = priceMap[row.symbol];
+      let unrealizedPnl = 0;
+      
+      if (currentPrice && row.entry_price_vwap) {
+        const entryPrice = Number(row.entry_price_vwap);
+        const qty = Number(row.quantity_open);
+        if (row.side === 'LONG') {
+          unrealizedPnl = (currentPrice - entryPrice) * qty;
+        } else {
+          unrealizedPnl = (entryPrice - currentPrice) * qty;
+        }
+      }
+      
+      return {
+        position_id: row.position_id,
+        run_id: row.run_id,
+        symbol: row.symbol,
+        side: row.side,
+        status: row.status,
+        size: Number(row.quantity_open),
+        entry_price: row.entry_price_vwap ? Number(row.entry_price_vwap) : undefined,
+        current_price: currentPrice,
+        unrealized_pnl: unrealizedPnl,
+        cost_basis: Number(row.cost_basis),
+        market_value: currentPrice ? currentPrice * Number(row.quantity_open) : undefined,
+        leverage: Number(row.leverage_effective),
+        opened_at: row.open_ts,
+        closed_at: row.close_ts || undefined,
+        fees_total: Number(row.fees_total),
+        realized_pnl: Number(row.realized_pnl)
+      };
+    });
 
     return NextResponse.json({ positions });
 

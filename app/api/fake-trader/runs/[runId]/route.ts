@@ -42,12 +42,88 @@ export async function GET(
       );
     }
 
+    // Get latest account snapshot
+    const snapshotQuery = `
+      SELECT equity, cash, margin_used, exposure_gross, exposure_net, open_positions_count, ts
+      FROM ft_account_snapshots
+      WHERE run_id = $1
+      ORDER BY ts DESC
+      LIMIT 1
+    `;
+    const snapshotResult = await pool.query(snapshotQuery, [runId]);
+
+    // Get open positions for unrealized PnL calculation
+    const openPositionsQuery = `
+      SELECT position_id, symbol, side, entry_price_vwap, quantity_open, cost_basis
+      FROM ft_positions_v2
+      WHERE run_id = $1 AND status IN ('NEW', 'OPEN')
+    `;
+    const openPositionsResult = await pool.query(openPositionsQuery, [runId]);
+
+    // Get latest prices for open positions
+    const symbols = openPositionsResult.rows.map((p: any) => p.symbol);
+    let priceMap: Record<string, number> = {};
+    
+    if (symbols.length > 0) {
+      const priceQuery = `
+        SELECT DISTINCT ON (symbol) symbol, close as price
+        FROM ohlcv_1m
+        WHERE symbol = ANY($1)
+        ORDER BY symbol, ts DESC
+      `;
+      const priceResult = await pool.query(priceQuery, [symbols]);
+      priceMap = Object.fromEntries(
+        priceResult.rows.map((r: any) => [r.symbol, Number(r.price)])
+      );
+    }
+
+    // Calculate unrealized PnL
+    let unrealizedPnl = 0;
+    for (const pos of openPositionsResult.rows) {
+      const currentPrice = priceMap[pos.symbol];
+      if (currentPrice && pos.entry_price_vwap) {
+        const entryPrice = Number(pos.entry_price_vwap);
+        const qty = Number(pos.quantity_open);
+        if (pos.side === 'LONG') {
+          unrealizedPnl += (currentPrice - entryPrice) * qty;
+        } else {
+          unrealizedPnl += (entryPrice - currentPrice) * qty;
+        }
+      }
+    }
+
+    // Get total realized PnL from closed positions
+    const realizedPnlQuery = `
+      SELECT COALESCE(SUM(realized_pnl), 0) as total_realized_pnl,
+             COALESCE(SUM(fees_total), 0) as total_fees
+      FROM ft_positions_v2
+      WHERE run_id = $1 AND status = 'CLOSED'
+    `;
+    const realizedPnlResult = await pool.query(realizedPnlQuery, [runId]);
+    const realizedPnl = Number(realizedPnlResult.rows[0].total_realized_pnl);
+    const totalFees = Number(realizedPnlResult.rows[0].total_fees);
+
+    // Use account snapshot if available
+    const snapshot = snapshotResult.rows[0];
+    const equity = snapshot ? Number(snapshot.equity) : Number(result.rows[0].current_capital);
+    const cash = snapshot ? Number(snapshot.cash) : (Number(result.rows[0].current_capital) - Number(snapshot?.margin_used || 0));
+    const marginUsed = snapshot ? Number(snapshot.margin_used) : 0;
+
     const run = {
       ...result.rows[0],
       symbols: Array.isArray(result.rows[0].symbols) ? result.rows[0].symbols : [],
       params: typeof result.rows[0].params === 'string' ? JSON.parse(result.rows[0].params) : result.rows[0].params,
       starting_capital: Number(result.rows[0].starting_capital),
-      current_capital: Number(result.rows[0].current_capital)
+      current_capital: Number(result.rows[0].current_capital),
+      equity: equity,
+      cash: cash,
+      available_funds: cash,
+      margin_used: marginUsed,
+      realized_pnl: realizedPnl,
+      unrealized_pnl: unrealizedPnl,
+      total_pnl: realizedPnl + unrealizedPnl,
+      total_fees: totalFees,
+      open_positions_count: snapshot ? snapshot.open_positions_count : openPositionsResult.rows.length
     };
 
     return NextResponse.json({ run });
