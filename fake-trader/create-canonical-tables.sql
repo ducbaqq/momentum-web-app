@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS ft_positions_v2 (
     
     -- Position details
     side TEXT NOT NULL CHECK (side IN ('LONG', 'SHORT')),
-    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED')),
+    status TEXT NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW', 'OPEN', 'CLOSED')), -- FSM: NEW → OPEN → CLOSED
     
     -- Timing
     open_ts TIMESTAMP WITH TIME ZONE NOT NULL,

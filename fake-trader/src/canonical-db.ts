@@ -35,6 +35,27 @@ export async function createOrder(order: Omit<Order, 'order_id' | 'created_at' |
 }
 
 export async function updateOrderStatus(orderId: string, status: Order['status']): Promise<void> {
+  // Validate state transition
+  const currentOrder = await pool.query('SELECT status FROM ft_orders WHERE order_id = $1', [orderId]);
+  if (currentOrder.rows.length === 0) {
+    throw new Error(`Order ${orderId} not found`);
+  }
+  
+  const currentStatus = currentOrder.rows[0].status;
+  
+  // Validate FSM transitions
+  const validTransitions: Record<string, string[]> = {
+    'NEW': ['PARTIAL', 'FILLED', 'CANCELLED', 'REJECTED'],
+    'PARTIAL': ['FILLED', 'CANCELLED'],
+    'FILLED': [], // Terminal state
+    'CANCELLED': [], // Terminal state
+    'REJECTED': [], // Terminal state
+  };
+  
+  if (!validTransitions[currentStatus]?.includes(status)) {
+    throw new Error(`Invalid order status transition: ${currentStatus} → ${status}`);
+  }
+  
   const query = `
     UPDATE ft_orders 
     SET status = $2, updated_at = NOW()
@@ -42,6 +63,49 @@ export async function updateOrderStatus(orderId: string, status: Order['status']
   `;
   
   await pool.query(query, [orderId, status]);
+}
+
+/**
+ * Update order status based on fills (Order FSM)
+ * NEW → PARTIAL → FILLED
+ * NEW → CANCELLED
+ * NEW → REJECTED
+ */
+export async function updateOrderStatusFromFills(orderId: string): Promise<void> {
+  // Get order details
+  const orderResult = await pool.query('SELECT qty, status FROM ft_orders WHERE order_id = $1', [orderId]);
+  if (orderResult.rows.length === 0) return;
+  
+  const order = orderResult.rows[0];
+  const orderQty = Number(order.qty);
+  const currentStatus = order.status;
+  
+  // If order is already terminal, don't update
+  if (['FILLED', 'CANCELLED', 'REJECTED'].includes(currentStatus)) {
+    return;
+  }
+  
+  // Get total filled quantity
+  const fillsResult = await pool.query(
+    'SELECT SUM(qty) as total_filled FROM ft_fills WHERE order_id = $1',
+    [orderId]
+  );
+  
+  const totalFilled = Number(fillsResult.rows[0]?.total_filled || 0);
+  
+  // Determine new status based on fills
+  if (totalFilled >= orderQty) {
+    // Fully filled
+    if (currentStatus !== 'FILLED') {
+      await updateOrderStatus(orderId, 'FILLED');
+    }
+  } else if (totalFilled > 0) {
+    // Partially filled
+    if (currentStatus !== 'PARTIAL') {
+      await updateOrderStatus(orderId, 'PARTIAL');
+    }
+  }
+  // If totalFilled === 0, order remains NEW
 }
 
 export async function linkOrderToPosition(orderId: string, positionId: string): Promise<void> {
@@ -78,7 +142,12 @@ export async function createFill(fill: Omit<Fill, 'fill_id' | 'created_at'>): Pr
   ];
   
   const result = await pool.query(query, values);
-  return result.rows[0].fill_id;
+  const fillId = result.rows[0].fill_id;
+  
+  // Update order status based on fills (Order FSM)
+  await updateOrderStatusFromFills(fill.order_id);
+  
+  return fillId;
 }
 
 export async function getFillsForPosition(positionId: string): Promise<Fill[]> {
@@ -120,6 +189,9 @@ export async function getFillsForOrder(orderId: string): Promise<Fill[]> {
 // ============================================================================
 
 export async function createPositionV2(position: Omit<PositionV2, 'position_id' | 'created_at' | 'updated_at'>): Promise<string> {
+  // Ensure position starts in NEW state (Position FSM: NEW → OPEN → CLOSED)
+  const status = position.status || 'NEW';
+  
   const query = `
     INSERT INTO ft_positions_v2 (
       run_id, symbol, side, status, open_ts, close_ts, entry_price_vwap, exit_price_vwap,
@@ -132,7 +204,7 @@ export async function createPositionV2(position: Omit<PositionV2, 'position_id' 
     position.run_id,
     position.symbol,
     position.side,
-    position.status,
+    status,
     position.open_ts,
     position.close_ts || null,
     position.entry_price_vwap || null,
@@ -152,7 +224,7 @@ export async function createPositionV2(position: Omit<PositionV2, 'position_id' 
 export async function getOpenPositionV2BySymbol(runId: string, symbol: string): Promise<PositionV2 | null> {
   const query = `
     SELECT * FROM ft_positions_v2
-    WHERE run_id = $1 AND symbol = $2 AND status = 'OPEN'
+    WHERE run_id = $1 AND symbol = $2 AND status IN ('NEW', 'OPEN')
     ORDER BY open_ts DESC
     LIMIT 1
   `;
@@ -189,6 +261,7 @@ export async function updatePositionFromFills(positionId: string): Promise<void>
   
   const position = positionQuery.rows[0];
   const side = position.side;
+  const currentStatus = position.status;
   
   // Get order types for all fills
   const orderTypes = new Map<string, string>();
@@ -240,6 +313,19 @@ export async function updatePositionFromFills(positionId: string): Promise<void>
     }
   }
   
+  // Position FSM: NEW → OPEN → CLOSED
+  let newStatus = currentStatus;
+  
+  // Transition: NEW → OPEN (when first fill happens)
+  if (currentStatus === 'NEW' && fills.length > 0) {
+    newStatus = 'OPEN';
+  }
+  
+  // Transition: OPEN → CLOSED (when position is flat after exit fills)
+  if (currentStatus === 'OPEN' && quantityOpen <= 0 && exitFills.length > 0) {
+    newStatus = 'CLOSED';
+  }
+  
   // Update position
   const updateQuery = `
     UPDATE ft_positions_v2 
@@ -249,6 +335,7 @@ export async function updatePositionFromFills(positionId: string): Promise<void>
       cost_basis = $4,
       fees_total = $5,
       realized_pnl = $6,
+      status = $7,
       updated_at = NOW()
     WHERE position_id = $1
   `;
@@ -260,10 +347,20 @@ export async function updatePositionFromFills(positionId: string): Promise<void>
     costBasis,
     feesTotal,
     realizedPnl,
+    newStatus,
   ]);
 }
 
 export async function closePositionV2(positionId: string, closeTs: string): Promise<void> {
+  // First, recompute metrics from fills (this will handle status transitions)
+  await updatePositionFromFills(positionId);
+  
+  // Get updated position to check if it's actually closed
+  const positionQuery = await pool.query('SELECT * FROM ft_positions_v2 WHERE position_id = $1', [positionId]);
+  if (positionQuery.rows.length === 0) return;
+  
+  const position = positionQuery.rows[0];
+  
   // Calculate exit VWAP from exit fills
   const fills = await getFillsForPosition(positionId);
   
@@ -289,6 +386,8 @@ export async function closePositionV2(positionId: string, closeTs: string): Prom
   
   const quantityClose = exitFills.reduce((sum, f) => sum + Number(f.qty), 0);
   
+  // Update position with close timestamp and exit VWAP
+  // Status transition to CLOSED is handled by updatePositionFromFills
   const updateQuery = `
     UPDATE ft_positions_v2 
     SET 
@@ -301,9 +400,6 @@ export async function closePositionV2(positionId: string, closeTs: string): Prom
   `;
   
   await pool.query(updateQuery, [positionId, closeTs, exitVwap, quantityClose]);
-  
-  // Recompute metrics from fills
-  await updatePositionFromFills(positionId);
 }
 
 // ============================================================================

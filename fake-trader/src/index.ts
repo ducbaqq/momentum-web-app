@@ -25,6 +25,7 @@ import {
   createPriceSnapshot,
   linkOrderToPosition,
   updateOrderStatus,
+  updateOrderStatusFromFills,
 } from './canonical-db.js';
 import { getStrategy } from './strategies.js';
 import type { FakeTradeRun, Candle, PositionV2 } from './types.js';
@@ -687,11 +688,12 @@ class FakeTrader {
       });
       
       // Canonical Model: Create PositionV2 (aggregated view)
+      // Position starts in NEW state (FSM: NEW → OPEN → CLOSED)
       const positionId = await createPositionV2({
         run_id: run.run_id,
         symbol: signal.symbol,
         side: signal.side,
-        status: 'OPEN',
+        status: 'NEW', // Will transition to OPEN after first fill
         open_ts: now,
         close_ts: undefined,
         entry_price_vwap: executionPrice, // Will be recomputed from fills
@@ -711,10 +713,11 @@ class FakeTrader {
         [positionId, fillId]
       );
       
-      // Update Order status to FILLED
-      await updateOrderStatus(orderId, 'FILLED');
+      // Update Order status based on fills (Order FSM: NEW → PARTIAL → FILLED)
+      // createFill already calls updateOrderStatusFromFills, but we'll ensure it's updated
+      await updateOrderStatusFromFills(orderId);
       
-      // Update Position metrics from fills
+      // Update Position metrics from fills (Position FSM: NEW → OPEN after first fill)
       await updatePositionFromFills(positionId);
       
       // Record PriceSnapshot

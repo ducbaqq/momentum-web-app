@@ -174,7 +174,7 @@ export interface PositionV2 {
   run_id: string;
   symbol: string;
   side: 'LONG' | 'SHORT';
-  status: 'OPEN' | 'CLOSED';
+  status: 'NEW' | 'OPEN' | 'CLOSED'; // FSM: NEW → OPEN → CLOSED
   open_ts: string;
   close_ts?: string;
   entry_price_vwap?: number;
