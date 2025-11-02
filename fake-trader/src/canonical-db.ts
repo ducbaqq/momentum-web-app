@@ -277,6 +277,31 @@ export async function createPositionV2(position: Omit<PositionV2, 'position_id' 
   return result.rows[0].position_id;
 }
 
+/**
+ * Get all open positions for a run (status IN ('NEW', 'OPEN'))
+ */
+export async function getOpenPositionsV2(runId: string): Promise<PositionV2[]> {
+  const query = `
+    SELECT * FROM ft_positions_v2
+    WHERE run_id = $1 AND status IN ('NEW', 'OPEN')
+    ORDER BY open_ts DESC
+  `;
+  
+  const result = await pool.query(query, [runId]);
+  return result.rows.map(row => ({
+    ...row,
+    close_ts: row.close_ts || undefined,
+    entry_price_vwap: row.entry_price_vwap ? Number(row.entry_price_vwap) : undefined,
+    exit_price_vwap: row.exit_price_vwap ? Number(row.exit_price_vwap) : undefined,
+    quantity_open: Number(row.quantity_open),
+    quantity_close: Number(row.quantity_close),
+    cost_basis: Number(row.cost_basis),
+    fees_total: Number(row.fees_total),
+    realized_pnl: Number(row.realized_pnl),
+    leverage_effective: Number(row.leverage_effective),
+  }));
+}
+
 export async function getOpenPositionV2BySymbol(runId: string, symbol: string): Promise<PositionV2 | null> {
   const query = `
     SELECT * FROM ft_positions_v2
