@@ -346,14 +346,27 @@ export async function updatePositionFromFills(positionId: string): Promise<void>
     }
   }
   
-  // Calculate realized PnL from exit fills
+  // Calculate realized PnL from exit fills using VWAPs
+  // PnL and Fees Rule: Realized PnL calculated at exit from VWAPs
+  // Formula: (exit_vwap - entry_vwap) * quantity - exit_fees
+  // Entry fees are already accounted for in cost_basis
   let realizedPnl = 0;
   if (exitFills.length > 0 && entryVwap) {
-    for (const fill of exitFills) {
-      const pnl = side === 'LONG' 
-        ? Number(fill.qty) * (Number(fill.price) - entryVwap)
-        : Number(fill.qty) * (entryVwap - Number(fill.price));
-      realizedPnl += pnl - Number(fill.fee);
+    // Calculate exit VWAP from exit fills
+    const exitTotalQty = exitFills.reduce((sum, f) => sum + Number(f.qty), 0);
+    const exitTotalValue = exitFills.reduce((sum, f) => sum + Number(f.qty) * Number(f.price), 0);
+    const exitVwap = exitTotalQty > 0 ? exitTotalValue / exitTotalQty : null;
+    
+    if (exitVwap) {
+      // Calculate realized PnL: (exit_vwap - entry_vwap) * quantity - exit_fees
+      const exitQuantity = exitFills.reduce((sum, f) => sum + Number(f.qty), 0);
+      const exitFees = exitFills.reduce((sum, f) => sum + Number(f.fee), 0);
+      
+      if (side === 'LONG') {
+        realizedPnl = exitQuantity * (exitVwap - entryVwap) - exitFees;
+      } else {
+        realizedPnl = exitQuantity * (entryVwap - exitVwap) - exitFees;
+      }
     }
   }
   

@@ -207,22 +207,27 @@ class FakeTrader {
         }
       }
       
-      // Calculate unrealized PnL from PositionV2 and latest prices
+      // PnL and Fees Rule: Unrealized PnL recomputed from mark price (never stored)
+      // Get current mark prices (live market prices)
       const livePrices = await getLivePrices(run.symbols);
       let unrealizedPnl = 0;
       
       for (const pos of positionsV2) {
-        const currentPrice = livePrices[pos.symbol];
-        if (currentPrice && pos.entry_price_vwap) {
-          const pnl = this.calculateUnrealizedPnLV2(pos, currentPrice);
+        const markPrice = livePrices[pos.symbol];
+        if (markPrice && pos.entry_price_vwap) {
+          // Compute unrealized PnL from mark price (current market price)
+          const pnl = this.calculateUnrealizedPnLV2(pos, markPrice);
           unrealizedPnl += pnl;
         }
       }
       
-      // Cash = current capital - margin used
+      // Cash = capital - margin used
+      // Note: capital only includes realized PnL (no unrealized)
       const cash = run.current_capital - marginUsed;
       
       // Equity = cash + margin used + unrealized PnL
+      // This is for display/reporting only - equity changes only when positions close
+      // (realized PnL is included in capital, unrealized is added here for display)
       const equity = cash + marginUsed + unrealizedPnl;
       
       await createAccountSnapshot({
@@ -380,26 +385,26 @@ class FakeTrader {
     }
 
     // Update run capital to include real-time unrealized P&L
-    await this.updateRunCapitalWithUnrealizedPnl(run);
+    await this.updateRunCapital(run);
   }
 
-  private async updateRunCapitalWithUnrealizedPnl(run: FakeTradeRun) {
-    // Get all positions V2 to calculate total P&L
-    const positionsV2 = await getOpenPositionsV2(run.run_id);
-    
-    // Get all fills to calculate realized PnL and fees
+  /**
+   * Update run capital based on realized PnL and fees only
+   * PnL and Fees Rule: Equity changes only on realized events
+   * Capital = starting_capital - total_fees_paid + realized_pnl
+   * Unrealized PnL is NOT included in capital (only for display/reporting)
+   */
+  private async updateRunCapital(run: FakeTradeRun) {
+    // Get all fills to calculate total fees paid
     const fillsResult = await pool.query(`
-      SELECT 
-        SUM(fee) as total_fees,
-        SUM(CASE WHEN o.type = 'EXIT' THEN f.fee ELSE 0 END) as exit_fees
-      FROM ft_fills f
-      JOIN ft_orders o ON f.order_id = o.order_id
-      WHERE f.run_id = $1
+      SELECT SUM(fee) as total_fees
+      FROM ft_fills
+      WHERE run_id = $1
     `, [run.run_id]);
     
     const totalFeesPaid = Number(fillsResult.rows[0]?.total_fees || 0);
     
-    // Get realized PnL from closed positions
+    // Get realized PnL from closed positions only
     const closedPositionsResult = await pool.query(`
       SELECT SUM(realized_pnl) as total_realized_pnl
       FROM ft_positions_v2
@@ -408,28 +413,27 @@ class FakeTrader {
     
     const totalRealizedPnl = Number(closedPositionsResult.rows[0]?.total_realized_pnl || 0);
     
-    // Calculate unrealized PnL from open positions
-    const livePrices = await getLivePrices(run.symbols);
-    let totalUnrealizedPnl = 0;
+    // Capital = starting capital - fees paid + realized PnL
+    // Note: Unrealized PnL is NOT included (equity changes only on realized events)
+    const capital = Number(run.starting_capital) - totalFeesPaid + totalRealizedPnl;
     
-    for (const pos of positionsV2) {
-      const currentPrice = livePrices[pos.symbol];
-      if (currentPrice && pos.entry_price_vwap) {
-        const pnl = this.calculateUnrealizedPnLV2(pos, currentPrice);
-        totalUnrealizedPnl += pnl;
-      }
-    }
-    
-    // Get total margin currently invested in open positions
-    const totalMarginInvested = positionsV2.reduce((sum, pos) => sum + pos.cost_basis, 0);
-
-    // Real-time capital = starting capital - total fees paid + realized P&L + unrealized P&L
-    // Note: margin invested is not subtracted because it's still allocated to positions and unrealized P&L reflects its current value
-    const realTimeCapital = Number(run.starting_capital) - totalFeesPaid + totalRealizedPnl + totalUnrealizedPnl;
-
     // Update the run's current capital
-    await updateRunCapital(run.run_id, realTimeCapital);
-    run.current_capital = realTimeCapital; // Update local copy
+    await updateRunCapital(run.run_id, capital);
+    run.current_capital = capital; // Update local copy
+  }
+
+  /**
+   * Calculate unrealized PnL from mark price (current market price)
+   * This is computed on-the-fly and never stored
+   */
+  private calculateUnrealizedPnLV2(position: PositionV2, markPrice: number): number {
+    if (!position.entry_price_vwap) return 0;
+    
+    if (position.side === 'LONG') {
+      return (markPrice - position.entry_price_vwap) * position.quantity_open;
+    } else {
+      return (position.entry_price_vwap - markPrice) * position.quantity_open;
+    }
   }
 
   private async checkExitConditions(run: FakeTradeRun, positionV2: PositionV2, currentPrice: number) {
@@ -494,8 +498,9 @@ class FakeTrader {
         price: currentPrice,
       });
       
-      // Update run capital - will be recalculated in updateRunCapitalWithUnrealizedPnl
-      await this.updateRunCapitalWithUnrealizedPnl(run);
+      // PnL and Fees Rule: Equity changes only on realized events
+      // Update capital when position closes (realized PnL is now included)
+      await this.updateRunCapital(run);
       
       console.log(`   ✅ Closed ${positionV2.symbol} position: Order ${exitOrderId.substring(0, 8)}... Fill ${exitFillId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
     }
@@ -688,10 +693,11 @@ class FakeTrader {
         return; // Exit early - don't execute the signal
       }
       
-      // Update run capital - reduce by margin required + fees when opening position
-      const newCapital = run.current_capital - marginRequired - fees;
-      await updateRunCapital(run.run_id, newCapital);
-      run.current_capital = newCapital; // Update local copy
+      // PnL and Fees Rule: Accurate fee tracking
+      // Fees are deducted from capital when paid (entry and exit)
+      // Margin is NOT deducted from capital (it's allocated to positions)
+      // Capital = starting_capital - fees_paid + realized_pnl
+      // Capital will be updated after fill is created (fees are tracked in fills)
       
       const now = new Date().toISOString();
       
@@ -755,6 +761,10 @@ class FakeTrader {
       // Update Position metrics from fills (Position FSM: NEW → OPEN after first fill)
       await updatePositionFromFills(positionId);
       
+      // PnL and Fees Rule: Update capital after fees are paid
+      // Fees are tracked in fills, so update capital to reflect fees deducted
+      await this.updateRunCapital(run);
+      
       // Record PriceSnapshot
       await createPriceSnapshot({
         run_id: run.run_id,
@@ -796,17 +806,6 @@ class FakeTrader {
         execution_notes: `Execution failed: ${error.message}`,
         signal_ts: new Date().toISOString()
       });
-    }
-  }
-
-
-  private calculateUnrealizedPnLV2(position: PositionV2, currentPrice: number): number {
-    if (!position.entry_price_vwap) return 0;
-    
-    if (position.side === 'LONG') {
-      return (currentPrice - position.entry_price_vwap) * position.quantity_open;
-    } else {
-      return (position.entry_price_vwap - currentPrice) * position.quantity_open;
     }
   }
 }
