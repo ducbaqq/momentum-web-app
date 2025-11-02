@@ -735,6 +735,20 @@ export async function testDeterministicPricePath(): Promise<TestResult> {
 export async function runAllTests(): Promise<void> {
   console.log('🧪 Running Fake Trader Test Suite...\n');
   
+  // Cleanup: Stop any existing test runs before starting
+  try {
+    await testPool.query(`
+      UPDATE ft_runs
+      SET status = 'stopped',
+          stopped_at = NOW(),
+          error = 'Stopped by test suite cleanup'
+      WHERE status IN ('active', 'winding_down')
+        AND name LIKE 'TEST: %'
+    `);
+  } catch (error: any) {
+    console.warn(`⚠️  Could not cleanup test runs: ${error.message}`);
+  }
+  
   const tests = [
     testDeterministicPricePath,
     testLongPnLMath,
@@ -772,6 +786,24 @@ export async function runAllTests(): Promise<void> {
       console.log(`   Error: ${error.message}`);
     }
     console.log('');
+  }
+  
+  // Cleanup: Stop any test runs created during testing
+  try {
+    const cleanupResult = await testPool.query(`
+      UPDATE ft_runs
+      SET status = 'stopped',
+          stopped_at = NOW(),
+          error = 'Stopped by test suite cleanup'
+      WHERE status IN ('active', 'winding_down')
+        AND name LIKE 'TEST: %'
+    `);
+    
+    if (cleanupResult.rowCount > 0) {
+      console.log(`🧹 Cleaned up ${cleanupResult.rowCount} test run(s)`);
+    }
+  } catch (error: any) {
+    console.warn(`⚠️  Could not cleanup test runs: ${error.message}`);
   }
   
   // Summary
