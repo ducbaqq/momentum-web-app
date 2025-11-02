@@ -19,8 +19,21 @@ import {
   getTrades,
   pool
 } from './db.js';
+import {
+  createOrder,
+  createFill,
+  createPositionV2,
+  getOpenPositionsV2,
+  getOpenPositionV2BySymbol,
+  updatePositionFromFills,
+  closePositionV2,
+  createAccountSnapshot,
+  createPriceSnapshot,
+  linkOrderToPosition,
+  updateOrderStatus,
+} from './canonical-db.js';
 import { getStrategy } from './strategies.js';
-import type { FakeTradeRun, Candle, FakePosition } from './types.js';
+import type { FakeTradeRun, Candle, FakePosition, PositionV2 } from './types.js';
 
 // Load environment variables
 dotenv.config();
@@ -160,6 +173,71 @@ class FakeTrader {
     }
     
     console.log('✅ Trading cycle completed');
+    
+    // Create AccountSnapshot for all active runs
+    for (const run of activeRuns) {
+      await this.createAccountSnapshot(run);
+    }
+  }
+
+  private async createAccountSnapshot(run: FakeTradeRun) {
+    try {
+      // Get open positions V2
+      const positionsV2 = await getOpenPositionsV2(run.run_id);
+      
+      // Calculate metrics from positions
+      const marginUsed = positionsV2.reduce((sum, pos) => sum + pos.cost_basis, 0);
+      
+      // Calculate exposure (gross and net)
+      // Gross exposure = sum of all position values (absolute)
+      // Net exposure = sum of position values (LONG positive, SHORT negative)
+      let exposureGross = 0;
+      let exposureNet = 0;
+      
+      for (const pos of positionsV2) {
+        const positionValue = pos.quantity_open * (pos.entry_price_vwap || 0);
+        exposureGross += Math.abs(positionValue);
+        if (pos.side === 'LONG') {
+          exposureNet += positionValue;
+        } else {
+          exposureNet -= positionValue;
+        }
+      }
+      
+      // Calculate unrealized PnL from PositionV2
+      // For now, we'll use the legacy positions for unrealized PnL calculation
+      // In the future, this should be computed from PriceSnapshots and PositionV2
+      const legacyPositions = await getCurrentPositions(run.run_id);
+      const livePrices = await getLivePrices(run.symbols);
+      let unrealizedPnl = 0;
+      
+      for (const pos of legacyPositions) {
+        const currentPrice = livePrices[pos.symbol];
+        if (currentPrice) {
+          const pnl = this.calculateUnrealizedPnL(pos, currentPrice);
+          unrealizedPnl += pnl;
+        }
+      }
+      
+      // Cash = current capital - margin used
+      const cash = run.current_capital - marginUsed;
+      
+      // Equity = cash + margin used + unrealized PnL
+      const equity = cash + marginUsed + unrealizedPnl;
+      
+      await createAccountSnapshot({
+        run_id: run.run_id,
+        ts: new Date().toISOString(),
+        equity,
+        cash,
+        margin_used: marginUsed,
+        exposure_gross: exposureGross,
+        exposure_net: Math.abs(exposureNet),
+        open_positions_count: positionsV2.length,
+      });
+    } catch (error: any) {
+      console.error(`Failed to create account snapshot for run ${run.run_id}:`, error.message);
+    }
   }
 
   private async processRun(run: FakeTradeRun) {
@@ -284,6 +362,14 @@ class FakeTrader {
       await updatePosition(position.position_id, livePrice, unrealizedPnl, marketValue);
       updatedCount++;
       
+      // Record PriceSnapshot for canonical model
+      await createPriceSnapshot({
+        run_id: run.run_id,
+        ts: new Date().toISOString(),
+        symbol: position.symbol,
+        price: livePrice,
+      });
+      
       if (verboseLogging) {
         const prevPrice = position.current_price ?? position.entry_price;
         console.log(`   📊 Updated ${position.symbol}: $${prevPrice?.toFixed(2) ?? 'N/A'} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
@@ -355,9 +441,60 @@ class FakeTrader {
     if (shouldExit) {
       console.log(`   🎯 Exit triggered for ${position.symbol}: ${exitReason} at $${currentPrice.toFixed(2)}`);
       
+      const now = new Date().toISOString();
+      
+      // Find PositionV2 for this symbol
+      const positionV2 = await getOpenPositionV2BySymbol(run.run_id, position.symbol);
+      
+      if (positionV2) {
+        // Canonical Model: Create EXIT Order
+        const exitOrderId = await createOrder({
+          position_id: positionV2.position_id,
+          run_id: run.run_id,
+          symbol: position.symbol,
+          ts: now,
+          side: position.side,
+          type: 'EXIT',
+          qty: positionV2.quantity_open, // Exit full position
+          price: currentPrice,
+          status: 'NEW',
+          reason_tag: exitReason,
+          rejection_reason: undefined,
+        });
+        
+        // Canonical Model: Create Fill for exit
+        const exitFees = position.size * currentPrice * 0.0004; // 0.04% fees
+        const exitFillId = await createFill({
+          order_id: exitOrderId,
+          position_id: positionV2.position_id,
+          run_id: run.run_id,
+          symbol: position.symbol,
+          ts: now,
+          qty: positionV2.quantity_open,
+          price: currentPrice,
+          fee: exitFees,
+        });
+        
+        // Update Order status to FILLED
+        await updateOrderStatus(exitOrderId, 'FILLED');
+        
+        // Close PositionV2 (will recompute PnL from fills)
+        await closePositionV2(positionV2.position_id, now);
+        
+        // Record PriceSnapshot
+        await createPriceSnapshot({
+          run_id: run.run_id,
+          ts: now,
+          symbol: position.symbol,
+          price: currentPrice,
+        });
+        
+        console.log(`     ✅ Canonical: Exit Order ${exitOrderId.substring(0, 8)}... Fill ${exitFillId.substring(0, 8)}... Position ${positionV2.position_id.substring(0, 8)}...`);
+      }
+      
+      // Legacy: Also close old position/trade for backward compatibility
       const realizedPnl = this.calculateRealizedPnL(position, currentPrice);
       const fees = position.size * currentPrice * 0.0004; // 0.04% fees
-      
       await closePosition(position.position_id, currentPrice, realizedPnl);
 
       // Update run capital - add back margin + realized P&L - fees
@@ -466,9 +603,17 @@ class FakeTrader {
       }
       
       // Check if there's already an open position for this symbol
+      const currentPositions = await getCurrentPositions(run.run_id);
       const existingPositionForSymbol = currentPositions.find(p => p.symbol === signal.symbol);
-      if (existingPositionForSymbol) {
-        console.log(`     🚫 Already have open position for ${signal.symbol} (${existingPositionForSymbol.side} @ $${existingPositionForSymbol.entry_price.toFixed(4)}) - skipping new ${signal.side} signal`);
+      
+      // Also check PositionV2
+      const existingPositionV2 = await getOpenPositionV2BySymbol(run.run_id, signal.symbol);
+      
+      if (existingPositionForSymbol || existingPositionV2) {
+        const existing = existingPositionForSymbol || existingPositionV2;
+        const side = existingPositionForSymbol?.side || existingPositionV2?.side;
+        const entryPrice = existingPositionForSymbol?.entry_price || existingPositionV2?.entry_price_vwap;
+        console.log(`     🚫 Already have open position for ${signal.symbol} (${side} @ $${entryPrice?.toFixed(4)}) - skipping new ${signal.side} signal`);
         
         // Log the rejected signal
         await logSignal({
@@ -480,7 +625,7 @@ class FakeTrader {
           price: signal.price,
           candle_data: candle,
           executed: false,
-          rejection_reason: `existing_position_for_symbol_${existingPositionForSymbol.side}_@_${existingPositionForSymbol.entry_price.toFixed(4)}`,
+          rejection_reason: `existing_position_for_symbol_${side}_@_${entryPrice?.toFixed(4)}`,
           signal_ts: new Date().toISOString()
         });
         
@@ -518,12 +663,82 @@ class FakeTrader {
       await updateRunCapital(run.run_id, newCapital);
       run.current_capital = newCapital; // Update local copy
       
-      // Create new trade first, then position with trade_id link
+      const now = new Date().toISOString();
+      
+      // Canonical Model: Create Order (trading intent)
+      const orderId = await createOrder({
+        position_id: undefined, // Will be set after position creation
+        run_id: run.run_id,
+        symbol: signal.symbol,
+        ts: now,
+        side: signal.side,
+        type: 'ENTRY',
+        qty: signal.size,
+        price: executionPrice, // Intended price
+        status: 'NEW',
+        reason_tag: signal.reason,
+        rejection_reason: undefined,
+      });
+      
+      // Canonical Model: Create Fill (actual execution)
+      const fillId = await createFill({
+        order_id: orderId,
+        position_id: undefined, // Will be set after position creation
+        run_id: run.run_id,
+        symbol: signal.symbol,
+        ts: now,
+        qty: signal.size,
+        price: executionPrice, // Actual fill price
+        fee: fees,
+      });
+      
+      // Canonical Model: Create PositionV2 (aggregated view)
+      const positionId = await createPositionV2({
+        run_id: run.run_id,
+        symbol: signal.symbol,
+        side: signal.side,
+        status: 'OPEN',
+        open_ts: now,
+        close_ts: undefined,
+        entry_price_vwap: executionPrice, // Will be recomputed from fills
+        exit_price_vwap: undefined,
+        quantity_open: signal.size,
+        quantity_close: 0,
+        cost_basis: marginRequired,
+        fees_total: fees,
+        realized_pnl: 0, // Computed from fills, never stored directly
+        leverage_effective: signal.leverage || 1,
+      });
+      
+      // Link Order and Fill to Position
+      await linkOrderToPosition(orderId, positionId);
+      await pool.query(
+        'UPDATE ft_fills SET position_id = $1 WHERE fill_id = $2',
+        [positionId, fillId]
+      );
+      
+      // Update Order status to FILLED
+      await updateOrderStatus(orderId, 'FILLED');
+      
+      // Update Position metrics from fills
+      await updatePositionFromFills(positionId);
+      
+      // Record PriceSnapshot
+      await createPriceSnapshot({
+        run_id: run.run_id,
+        ts: now,
+        symbol: signal.symbol,
+        price: executionPrice,
+      });
+      
+      console.log(`     ✅ Opened ${signal.side} position: Order ${orderId.substring(0, 8)}... Fill ${fillId.substring(0, 8)}... Position ${positionId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
+      
+      // Legacy: Also create Trade/Position for backward compatibility (can be removed later)
       const tradeId = await createTrade({
         run_id: run.run_id,
         symbol: signal.symbol,
         side: signal.side,
-        entry_ts: new Date().toISOString(),
+        entry_ts: now,
         qty: signal.size,
         entry_px: executionPrice,
         realized_pnl: 0,
@@ -534,24 +749,22 @@ class FakeTrader {
         status: 'open'
       });
       
-      const positionId = await createPosition({
+      await createPosition({
         run_id: run.run_id,
-        trade_id: tradeId, // Link position to trade
+        trade_id: tradeId,
         symbol: signal.symbol,
         side: signal.side,
         size: signal.size,
         entry_price: executionPrice,
         current_price: executionPrice,
         unrealized_pnl: 0,
-        cost_basis: marginRequired, // Store margin amount, not full position value
+        cost_basis: marginRequired,
         market_value: signal.size * executionPrice,
         stop_loss: signal.stopLoss,
         take_profit: signal.takeProfit,
         leverage: signal.leverage || 1,
         status: 'open'
       });
-      
-      console.log(`     ✅ Opened ${signal.side} position: Trade ${tradeId.substring(0, 8)}... Position ${positionId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
       
       // Log successful signal execution
       await logSignal({

@@ -149,15 +149,19 @@ export async function createPositionV2(position: Omit<PositionV2, 'position_id' 
   return result.rows[0].position_id;
 }
 
-export async function getOpenPositionsV2(runId: string): Promise<PositionV2[]> {
+export async function getOpenPositionV2BySymbol(runId: string, symbol: string): Promise<PositionV2 | null> {
   const query = `
     SELECT * FROM ft_positions_v2
-    WHERE run_id = $1 AND status = 'OPEN'
+    WHERE run_id = $1 AND symbol = $2 AND status = 'OPEN'
     ORDER BY open_ts DESC
+    LIMIT 1
   `;
   
-  const result = await pool.query(query, [runId]);
-  return result.rows.map(row => ({
+  const result = await pool.query(query, [runId, symbol]);
+  if (result.rows.length === 0) return null;
+  
+  const row = result.rows[0];
+  return {
     ...row,
     close_ts: row.close_ts || undefined,
     entry_price_vwap: row.entry_price_vwap ? Number(row.entry_price_vwap) : undefined,
@@ -168,7 +172,7 @@ export async function getOpenPositionsV2(runId: string): Promise<PositionV2[]> {
     fees_total: Number(row.fees_total),
     realized_pnl: Number(row.realized_pnl),
     leverage_effective: Number(row.leverage_effective),
-  }));
+  };
 }
 
 export async function updatePositionFromFills(positionId: string): Promise<void> {
