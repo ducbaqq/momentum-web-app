@@ -97,7 +97,7 @@ export function generateDeterministicPricePath(
   };
   
   for (let i = 1; i < steps; i++) {
-    const change = (lgc() - 0.5) * 0.02; // -1% to +1%
+    const change = (lcg() - 0.5) * 0.02; // -1% to +1%
     currentPrice = currentPrice * (1 + change);
     prices.push(currentPrice);
   }
@@ -246,14 +246,37 @@ export async function testShortPnLMath(): Promise<TestResult> {
 }
 
 /**
- * Test: Partial Fills
+ * Test: Partial Fills (requires database but skips if FK constraint fails)
  */
 export async function testPartialFills(): Promise<TestResult> {
   const testName = 'Partial Fills';
   
   try {
-    // Create a test run (use a test UUID)
+    // Create a test run first (use a test UUID)
     const runId = '00000000-0000-0000-0000-000000000000';
+    
+    // Try to create a test run if it doesn't exist
+    try {
+      await testPool.query(`
+        INSERT INTO ft_runs (
+          run_id, name, symbols, timeframe, strategy_name, strategy_version,
+          params, status, starting_capital, current_capital, max_concurrent_positions,
+          started_at, created_at
+        ) VALUES (
+          $1, 'Test Run', ARRAY['TESTUSDT'], '15m', 'test', '1.0',
+          '{}', 'active', 10000, 10000, 10,
+          NOW(), NOW()
+        ) ON CONFLICT (run_id) DO NOTHING
+      `, [runId]);
+    } catch (error: any) {
+      // If run creation fails, skip this test
+      return {
+        name: testName,
+        passed: false,
+        error: `Cannot create test run: ${error.message}. Skipping database-dependent test.`,
+        details: { runId, error: error.message }
+      };
+    }
     
     // Create order for 100 units
     const orderId = await createOrder({
@@ -716,7 +739,7 @@ export async function runAllTests(): Promise<void> {
     testDeterministicPricePath,
     testLongPnLMath,
     testShortPnLMath,
-    testPartialFillsWithPosition,
+    testPartialFills,
     testFeeCorrectness,
     testCSVSchemaValidation,
     testJSONSchemaValidation,
