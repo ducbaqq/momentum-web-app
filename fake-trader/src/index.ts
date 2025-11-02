@@ -465,6 +465,28 @@ class FakeTrader {
         return; // Exit early - don't execute the signal
       }
       
+      // Check if there's already an open position for this symbol
+      const existingPositionForSymbol = currentPositions.find(p => p.symbol === signal.symbol);
+      if (existingPositionForSymbol) {
+        console.log(`     🚫 Already have open position for ${signal.symbol} (${existingPositionForSymbol.side} @ $${existingPositionForSymbol.entry_price.toFixed(4)}) - skipping new ${signal.side} signal`);
+        
+        // Log the rejected signal
+        await logSignal({
+          run_id: run.run_id,
+          symbol: signal.symbol,
+          signal_type: 'entry',
+          side: signal.side,
+          size: signal.size,
+          price: signal.price,
+          candle_data: candle,
+          executed: false,
+          rejection_reason: `existing_position_for_symbol_${existingPositionForSymbol.side}_@_${existingPositionForSymbol.entry_price.toFixed(4)}`,
+          signal_ts: new Date().toISOString()
+        });
+        
+        return; // Exit early - don't execute the signal
+      }
+      
       // Use 15-minute candle close price for execution (consistent with backtest)
       const executionPrice = candle.close; // Execute at 15m candle close price
       const positionValue = signal.size * executionPrice; // Total position value (margin * leverage)
@@ -576,6 +598,13 @@ class FakeTrader {
         const currentPositions = await getCurrentPositions(run.run_id);
         if (currentPositions.length >= run.max_concurrent_positions) {
           console.log(`     🚫 Position limit reached: ${currentPositions.length}/${run.max_concurrent_positions} - skipping signal`);
+          return; // Exit early
+        }
+        
+        // Check if there's already an open position for this symbol
+        const existingPositionForSymbol = currentPositions.find(p => p.symbol === signal.symbol);
+        if (existingPositionForSymbol) {
+          console.log(`     🚫 Already have open position for ${signal.symbol} (${existingPositionForSymbol.side} @ $${existingPositionForSymbol.entry_price.toFixed(4)}) - skipping new ${signal.side} signal`);
           return; // Exit early
         }
         
