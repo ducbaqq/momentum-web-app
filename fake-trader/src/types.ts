@@ -12,6 +12,7 @@ export interface FakeTradeRun {
   starting_capital: number;
   current_capital: number;
   max_concurrent_positions: number;
+  allow_multiple_positions_per_symbol?: boolean; // Default: false (single position per symbol)
   
   started_at: string;
   last_update?: string;

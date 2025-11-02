@@ -19,6 +19,8 @@ import {
   createPositionV2,
   getOpenPositionsV2,
   getOpenPositionV2BySymbol,
+  getOpenPositionsV2BySymbol,
+  hasOverlappingPosition,
   updatePositionFromFills,
   closePositionV2,
   createAccountSnapshot,
@@ -605,11 +607,15 @@ class FakeTrader {
         return; // Exit early - don't execute the signal
       }
       
-      // Check if there's already an open position for this symbol
-      const existingPositionV2 = await getOpenPositionV2BySymbol(run.run_id, signal.symbol);
+      // Position Rules Enforcement:
+      // 1. No overlapping long/short in same strategy context (always enforced)
+      // 2. Single-position per symbol unless multi-mode enabled
+      // 3. Enforce uniqueness constraints at database level
       
-      if (existingPositionV2) {
-        console.log(`     🚫 Already have open position for ${signal.symbol} (${existingPositionV2.side} @ $${existingPositionV2.entry_price_vwap?.toFixed(4)}) - skipping new ${signal.side} signal`);
+      // Rule 1: Always prevent overlapping LONG/SHORT positions
+      const hasOverlap = await hasOverlappingPosition(run.run_id, signal.symbol, signal.side);
+      if (hasOverlap) {
+        console.log(`     🚫 Overlapping position detected for ${signal.symbol}: already have ${signal.side === 'LONG' ? 'SHORT' : 'LONG'} position - skipping new ${signal.side} signal`);
         
         // Log the rejected signal
         await logSignal({
@@ -621,12 +627,40 @@ class FakeTrader {
           price: signal.price,
           candle_data: candle,
           executed: false,
-          rejection_reason: `existing_position_for_symbol_${existingPositionV2.side}_@_${existingPositionV2.entry_price_vwap?.toFixed(4)}`,
+          rejection_reason: `overlapping_position_opposite_side_${signal.side === 'LONG' ? 'SHORT' : 'LONG'}`,
           signal_ts: new Date().toISOString()
         });
         
         return; // Exit early - don't execute the signal
       }
+      
+      // Rule 2: Single-position per symbol unless multi-mode enabled
+      const allowMultiMode = run.allow_multiple_positions_per_symbol === true;
+      if (!allowMultiMode) {
+        const existingPositionV2 = await getOpenPositionV2BySymbol(run.run_id, signal.symbol);
+        
+        if (existingPositionV2) {
+          console.log(`     🚫 Already have open position for ${signal.symbol} (${existingPositionV2.side} @ $${existingPositionV2.entry_price_vwap?.toFixed(4)}) - skipping new ${signal.side} signal (multi-mode disabled)`);
+          
+          // Log the rejected signal
+          await logSignal({
+            run_id: run.run_id,
+            symbol: signal.symbol,
+            signal_type: 'entry',
+            side: signal.side,
+            size: signal.size,
+            price: signal.price,
+            candle_data: candle,
+            executed: false,
+            rejection_reason: `existing_position_for_symbol_${existingPositionV2.side}_@_${existingPositionV2.entry_price_vwap?.toFixed(4)}_multi_mode_disabled`,
+            signal_ts: new Date().toISOString()
+          });
+          
+          return; // Exit early - don't execute the signal
+        }
+      }
+      // If multi-mode is enabled, we allow multiple positions of the same side
+      // (overlapping positions are already prevented above)
       
       // Use 15-minute candle close price for execution (consistent with backtest)
       const executionPrice = candle.close; // Execute at 15m candle close price

@@ -247,6 +247,50 @@ export async function getOpenPositionV2BySymbol(runId: string, symbol: string): 
   };
 }
 
+/**
+ * Get all open positions for a symbol (for multi-mode support)
+ */
+export async function getOpenPositionsV2BySymbol(runId: string, symbol: string): Promise<PositionV2[]> {
+  const query = `
+    SELECT * FROM ft_positions_v2
+    WHERE run_id = $1 AND symbol = $2 AND status IN ('NEW', 'OPEN')
+    ORDER BY open_ts DESC
+  `;
+  
+  const result = await pool.query(query, [runId, symbol]);
+  return result.rows.map(row => ({
+    ...row,
+    close_ts: row.close_ts || undefined,
+    entry_price_vwap: row.entry_price_vwap ? Number(row.entry_price_vwap) : undefined,
+    exit_price_vwap: row.exit_price_vwap ? Number(row.exit_price_vwap) : undefined,
+    quantity_open: Number(row.quantity_open),
+    quantity_close: Number(row.quantity_close),
+    cost_basis: Number(row.cost_basis),
+    fees_total: Number(row.fees_total),
+    realized_pnl: Number(row.realized_pnl),
+    leverage_effective: Number(row.leverage_effective),
+  }));
+}
+
+/**
+ * Check if there's an overlapping position (opposite side) for the same symbol
+ * This prevents LONG and SHORT positions for the same symbol in the same run
+ */
+export async function hasOverlappingPosition(runId: string, symbol: string, side: 'LONG' | 'SHORT'): Promise<boolean> {
+  const oppositeSide = side === 'LONG' ? 'SHORT' : 'LONG';
+  const query = `
+    SELECT COUNT(*) as count
+    FROM ft_positions_v2
+    WHERE run_id = $1 
+      AND symbol = $2 
+      AND side = $3
+      AND status IN ('NEW', 'OPEN')
+  `;
+  
+  const result = await pool.query(query, [runId, symbol, oppositeSide]);
+  return Number(result.rows[0]?.count || 0) > 0;
+}
+
 export async function updatePositionFromFills(positionId: string): Promise<void> {
   // Compute position metrics from fills
   const fills = await getFillsForPosition(positionId);

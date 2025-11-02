@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS ft_positions_v2 (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+-- Position Rules: Enforce uniqueness constraints
+-- Rule: No overlapping LONG/SHORT positions for same symbol in same run
+-- This partial unique index enforces that you can't have both LONG and SHORT open at the same time
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ft_positions_v2_unique_active_per_side 
+  ON ft_positions_v2(run_id, symbol, side) 
+  WHERE status IN ('NEW', 'OPEN');
+
 -- Orders: Trading intent (entry/exit signals)
 CREATE TABLE IF NOT EXISTS ft_orders (
     order_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
