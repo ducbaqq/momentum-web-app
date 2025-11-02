@@ -8,15 +8,9 @@ import {
   getLivePrices,
   getLastProcessedCandle,
   updateLastProcessedCandle,
-  getCurrentPositions,
-  createTrade,
-  createPosition,
-  updatePosition,
-  closePosition,
   logSignal,
   updateRunStatus,
   updateRunCapital,
-  getTrades,
   pool
 } from './db.js';
 import {
@@ -33,7 +27,7 @@ import {
   updateOrderStatus,
 } from './canonical-db.js';
 import { getStrategy } from './strategies.js';
-import type { FakeTradeRun, Candle, FakePosition, PositionV2 } from './types.js';
+import type { FakeTradeRun, Candle, PositionV2 } from './types.js';
 
 // Load environment variables
 dotenv.config();
@@ -116,34 +110,40 @@ class FakeTrader {
     try {
       console.log(`🔄 Refreshing stale positions for run ${run.run_id}`);
       
-      // Get current positions for this run
-      const positions = await getCurrentPositions(run.run_id);
+      // Get current positions V2 for this run
+      const positionsV2 = await getOpenPositionsV2(run.run_id);
       
-      if (positions.length === 0) {
+      if (positionsV2.length === 0) {
         return;
       }
       
       // Get current market data for position symbols
-      const symbols = [...new Set(positions.map(p => p.symbol))];
+      const symbols = [...new Set(positionsV2.map(p => p.symbol))];
       const candles = await getCurrentCandles(symbols);
       
       // Update each position with current market price
-      for (const position of positions) {
+      for (const position of positionsV2) {
         const candle = candles[position.symbol];
         if (!candle) {
           console.log(`⚠️  No current data for ${position.symbol}, keeping stale price`);
           continue;
         }
         
-        const unrealizedPnl = this.calculateUnrealizedPnL(position, candle.close);
-        const marketValue = position.size * candle.close;
+        // Record PriceSnapshot
+        await createPriceSnapshot({
+          run_id: run.run_id,
+          ts: new Date().toISOString(),
+          symbol: position.symbol,
+          price: candle.close,
+        });
         
-        await updatePosition(position.position_id, candle.close, unrealizedPnl, marketValue);
-        
-        console.log(`   📊 Updated ${position.symbol}: ${position.current_price} → ${candle.close} (P&L: ${unrealizedPnl.toFixed(2)})`);
+        if (position.entry_price_vwap) {
+          const unrealizedPnl = this.calculateUnrealizedPnLV2(position, candle.close);
+          console.log(`   📊 Updated ${position.symbol}: $${position.entry_price_vwap.toFixed(2)} → $${candle.close.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
+        }
       }
       
-      console.log(`✅ Updated ${positions.length} stale positions for run ${run.run_id}`);
+      console.log(`✅ Updated ${positionsV2.length} stale positions for run ${run.run_id}`);
       
     } catch (error) {
       console.error(`❌ Failed to refresh positions for run ${run.run_id}:`, error);
@@ -204,17 +204,14 @@ class FakeTrader {
         }
       }
       
-      // Calculate unrealized PnL from PositionV2
-      // For now, we'll use the legacy positions for unrealized PnL calculation
-      // In the future, this should be computed from PriceSnapshots and PositionV2
-      const legacyPositions = await getCurrentPositions(run.run_id);
+      // Calculate unrealized PnL from PositionV2 and latest prices
       const livePrices = await getLivePrices(run.symbols);
       let unrealizedPnl = 0;
       
-      for (const pos of legacyPositions) {
+      for (const pos of positionsV2) {
         const currentPrice = livePrices[pos.symbol];
-        if (currentPrice) {
-          const pnl = this.calculateUnrealizedPnL(pos, currentPrice);
+        if (currentPrice && pos.entry_price_vwap) {
+          const pnl = this.calculateUnrealizedPnLV2(pos, currentPrice);
           unrealizedPnl += pnl;
         }
       }
@@ -254,16 +251,16 @@ class FakeTrader {
     }
     
     // Safety check - if run has way too many positions, stop it immediately
-    const currentPositions = await getCurrentPositions(run.run_id);
-    if (currentPositions.length > run.max_concurrent_positions * 2) {
-      console.log(`   🚨 SAFETY: Too many positions (${currentPositions.length} vs limit ${run.max_concurrent_positions}) - stopping run and closing positions`);
+    const currentPositionsV2 = await getOpenPositionsV2(run.run_id);
+    if (currentPositionsV2.length > run.max_concurrent_positions * 2) {
+      console.log(`   🚨 SAFETY: Too many positions (${currentPositionsV2.length} vs limit ${run.max_concurrent_positions}) - stopping run and closing positions`);
       
       // Stop the run
-      await updateRunStatus(run.run_id, 'stopped', `Safety stop: Too many open positions (${currentPositions.length} vs limit ${run.max_concurrent_positions})`);
+      await updateRunStatus(run.run_id, 'stopped', `Safety stop: Too many open positions (${currentPositionsV2.length} vs limit ${run.max_concurrent_positions})`);
       
       // Force close all positions  
-      await pool.query(`UPDATE ft_positions SET status = 'closed' WHERE run_id = $1 AND status = 'open'`, [run.run_id]);
-      console.log(`   🔄 Force closed ${currentPositions.length} positions`);
+      await pool.query(`UPDATE ft_positions_v2 SET status = 'CLOSED' WHERE run_id = $1 AND status = 'OPEN'`, [run.run_id]);
+      console.log(`   🔄 Force closed ${currentPositionsV2.length} positions`);
       
       return;
     }
@@ -320,14 +317,13 @@ class FakeTrader {
     // Update run's last update timestamp and check if winding down run should be stopped
     if (run.status === 'winding_down') {
       // Get current positions to check if all are closed
-      const allPositions = await getCurrentPositions(run.run_id);
-      const openPositionsCount = allPositions.filter(p => p.status === 'open').length;
+      const allPositionsV2 = await getOpenPositionsV2(run.run_id);
       
-      if (openPositionsCount === 0) {
+      if (allPositionsV2.length === 0) {
         console.log(`✅ All positions closed for winding down run ${run.run_id}, stopping run`);
         await updateRunStatus(run.run_id, 'stopped', 'All positions closed during wind down');
       } else {
-        console.log(`🔄 Winding down run ${run.run_id} has ${openPositionsCount} open positions remaining`);
+        console.log(`🔄 Winding down run ${run.run_id} has ${allPositionsV2.length} open positions remaining`);
         await updateRunStatus(run.run_id, 'winding_down');
       }
     } else {
@@ -336,19 +332,19 @@ class FakeTrader {
   }
 
   private async updateExistingPositions(run: FakeTradeRun, livePrices: Record<string, number>) {
-    const positions = await getCurrentPositions(run.run_id);
+    const positionsV2 = await getOpenPositionsV2(run.run_id);
     
-    if (positions.length === 0) {
+    if (positionsV2.length === 0) {
       return;
     }
     
-    console.log(`   📍 Updating ${positions.length} open positions with live prices`);
+    console.log(`   📍 Updating ${positionsV2.length} open positions with live prices`);
     
     // If there are too many positions, it indicates a problem - don't spam logs
-    const verboseLogging = positions.length <= 10;
+    const verboseLogging = positionsV2.length <= 10;
     let updatedCount = 0;
     
-    for (const position of positions) {
+    for (const position of positionsV2) {
       const livePrice = livePrices[position.symbol];
       if (!livePrice) {
         if (verboseLogging) {
@@ -356,11 +352,6 @@ class FakeTrader {
         }
         continue;
       }
-      
-      const unrealizedPnl = this.calculateUnrealizedPnL(position, livePrice);
-      const marketValue = position.size * livePrice;
-      await updatePosition(position.position_id, livePrice, unrealizedPnl, marketValue);
-      updatedCount++;
       
       // Record PriceSnapshot for canonical model
       await createPriceSnapshot({
@@ -370,14 +361,15 @@ class FakeTrader {
         price: livePrice,
       });
       
-      if (verboseLogging) {
-        const prevPrice = position.current_price ?? position.entry_price;
-        console.log(`   📊 Updated ${position.symbol}: $${prevPrice?.toFixed(2) ?? 'N/A'} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
+      if (verboseLogging && position.entry_price_vwap) {
+        const unrealizedPnl = this.calculateUnrealizedPnLV2(position, livePrice);
+        console.log(`   📊 Updated ${position.symbol}: $${position.entry_price_vwap.toFixed(2)} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
       }
       
-      // Check for stop loss / take profit triggers using live prices
+      updatedCount++;
+      
+      // Check for exit conditions using live prices
       await this.checkExitConditions(run, position, livePrice);
-      // Note: We can't accurately count exits here since checkExitConditions doesn't return status
     }
     
     if (!verboseLogging) {
@@ -389,18 +381,44 @@ class FakeTrader {
   }
 
   private async updateRunCapitalWithUnrealizedPnl(run: FakeTradeRun) {
-    // Get all positions and trades to calculate total P&L
-    const positions = await getCurrentPositions(run.run_id);
-    const trades = await getTrades(run.run_id);
-
-    const totalUnrealizedPnl = positions.reduce((sum, pos) => sum + Number(pos.unrealized_pnl), 0);
-    const totalRealizedPnl = trades.filter(t => t.status === 'closed').reduce((sum, trade) => sum + Number(trade.realized_pnl), 0);
-
-    // Get total fees paid for all trades (both open and closed)
-    const totalFeesPaid = trades.reduce((sum, trade) => sum + Number(trade.fees), 0);
-
+    // Get all positions V2 to calculate total P&L
+    const positionsV2 = await getOpenPositionsV2(run.run_id);
+    
+    // Get all fills to calculate realized PnL and fees
+    const fillsResult = await pool.query(`
+      SELECT 
+        SUM(fee) as total_fees,
+        SUM(CASE WHEN o.type = 'EXIT' THEN f.fee ELSE 0 END) as exit_fees
+      FROM ft_fills f
+      JOIN ft_orders o ON f.order_id = o.order_id
+      WHERE f.run_id = $1
+    `, [run.run_id]);
+    
+    const totalFeesPaid = Number(fillsResult.rows[0]?.total_fees || 0);
+    
+    // Get realized PnL from closed positions
+    const closedPositionsResult = await pool.query(`
+      SELECT SUM(realized_pnl) as total_realized_pnl
+      FROM ft_positions_v2
+      WHERE run_id = $1 AND status = 'CLOSED'
+    `, [run.run_id]);
+    
+    const totalRealizedPnl = Number(closedPositionsResult.rows[0]?.total_realized_pnl || 0);
+    
+    // Calculate unrealized PnL from open positions
+    const livePrices = await getLivePrices(run.symbols);
+    let totalUnrealizedPnl = 0;
+    
+    for (const pos of positionsV2) {
+      const currentPrice = livePrices[pos.symbol];
+      if (currentPrice && pos.entry_price_vwap) {
+        const pnl = this.calculateUnrealizedPnLV2(pos, currentPrice);
+        totalUnrealizedPnl += pnl;
+      }
+    }
+    
     // Get total margin currently invested in open positions
-    const totalMarginInvested = positions.reduce((sum, pos) => sum + Number(pos.cost_basis), 0);
+    const totalMarginInvested = positionsV2.reduce((sum, pos) => sum + pos.cost_basis, 0);
 
     // Real-time capital = starting capital - total fees paid + realized P&L + unrealized P&L
     // Note: margin invested is not subtracted because it's still allocated to positions and unrealized P&L reflects its current value
@@ -411,99 +429,71 @@ class FakeTrader {
     run.current_capital = realTimeCapital; // Update local copy
   }
 
-  private async checkExitConditions(run: FakeTradeRun, position: FakePosition, currentPrice: number) {
+  private async checkExitConditions(run: FakeTradeRun, positionV2: PositionV2, currentPrice: number) {
     let shouldExit = false;
     let exitReason = '';
     
     // Check time-based exit (close positions older than 24 hours)
-    const hoursOpen = (new Date().getTime() - new Date(position.opened_at).getTime()) / (1000 * 60 * 60);
+    const hoursOpen = (new Date().getTime() - new Date(positionV2.open_ts).getTime()) / (1000 * 60 * 60);
     if (hoursOpen > 24) {
       shouldExit = true;
       exitReason = 'time_based_exit';
     }
     
-    // Check stop loss
-    if (position.stop_loss && 
-        ((position.side === 'LONG' && currentPrice <= position.stop_loss) ||
-         (position.side === 'SHORT' && currentPrice >= position.stop_loss))) {
-      shouldExit = true;
-      exitReason = 'stop_loss_trigger';
-    }
-    
-    // Check take profit
-    if (position.take_profit && 
-        ((position.side === 'LONG' && currentPrice >= position.take_profit) ||
-         (position.side === 'SHORT' && currentPrice <= position.take_profit))) {
-      shouldExit = true;
-      exitReason = 'take_profit_trigger';
-    }
+    // Note: Stop loss and take profit would need to be stored in PositionV2
+    // For now, we'll rely on strategy-generated exit signals
     
     if (shouldExit) {
-      console.log(`   🎯 Exit triggered for ${position.symbol}: ${exitReason} at $${currentPrice.toFixed(2)}`);
+      console.log(`   🎯 Exit triggered for ${positionV2.symbol}: ${exitReason} at $${currentPrice.toFixed(2)}`);
       
       const now = new Date().toISOString();
       
-      // Find PositionV2 for this symbol
-      const positionV2 = await getOpenPositionV2BySymbol(run.run_id, position.symbol);
+      // Create EXIT Order
+      const exitOrderId = await createOrder({
+        position_id: positionV2.position_id,
+        run_id: run.run_id,
+        symbol: positionV2.symbol,
+        ts: now,
+        side: positionV2.side,
+        type: 'EXIT',
+        qty: positionV2.quantity_open, // Exit full position
+        price: currentPrice,
+        status: 'NEW',
+        reason_tag: exitReason,
+        rejection_reason: undefined,
+      });
       
-      if (positionV2) {
-        // Canonical Model: Create EXIT Order
-        const exitOrderId = await createOrder({
-          position_id: positionV2.position_id,
-          run_id: run.run_id,
-          symbol: position.symbol,
-          ts: now,
-          side: position.side,
-          type: 'EXIT',
-          qty: positionV2.quantity_open, // Exit full position
-          price: currentPrice,
-          status: 'NEW',
-          reason_tag: exitReason,
-          rejection_reason: undefined,
-        });
-        
-        // Canonical Model: Create Fill for exit
-        const exitFees = position.size * currentPrice * 0.0004; // 0.04% fees
-        const exitFillId = await createFill({
-          order_id: exitOrderId,
-          position_id: positionV2.position_id,
-          run_id: run.run_id,
-          symbol: position.symbol,
-          ts: now,
-          qty: positionV2.quantity_open,
-          price: currentPrice,
-          fee: exitFees,
-        });
-        
-        // Update Order status to FILLED
-        await updateOrderStatus(exitOrderId, 'FILLED');
-        
-        // Close PositionV2 (will recompute PnL from fills)
-        await closePositionV2(positionV2.position_id, now);
-        
-        // Record PriceSnapshot
-        await createPriceSnapshot({
-          run_id: run.run_id,
-          ts: now,
-          symbol: position.symbol,
-          price: currentPrice,
-        });
-        
-        console.log(`     ✅ Canonical: Exit Order ${exitOrderId.substring(0, 8)}... Fill ${exitFillId.substring(0, 8)}... Position ${positionV2.position_id.substring(0, 8)}...`);
-      }
+      // Create Fill for exit
+      const exitFees = positionV2.quantity_open * currentPrice * 0.0004; // 0.04% fees
+      const exitFillId = await createFill({
+        order_id: exitOrderId,
+        position_id: positionV2.position_id,
+        run_id: run.run_id,
+        symbol: positionV2.symbol,
+        ts: now,
+        qty: positionV2.quantity_open,
+        price: currentPrice,
+        fee: exitFees,
+      });
       
-      // Legacy: Also close old position/trade for backward compatibility
-      const realizedPnl = this.calculateRealizedPnL(position, currentPrice);
-      const fees = position.size * currentPrice * 0.0004; // 0.04% fees
-      await closePosition(position.position_id, currentPrice, realizedPnl);
-
-      // Update run capital - add back margin + realized P&L - fees
-      // For leverage: margin was deducted on open, add it back + P&L on leveraged position
-      const newCapital = run.current_capital + position.cost_basis + realizedPnl - fees;
-      await updateRunCapital(run.run_id, newCapital);
-      run.current_capital = newCapital; // Update local copy
+      // Update Order status to FILLED
+      await updateOrderStatus(exitOrderId, 'FILLED');
       
-      console.log(`   ✅ Closed ${position.symbol} position: P&L $${realizedPnl.toFixed(2)} (fees: $${fees.toFixed(2)}) (Capital: $${run.current_capital.toFixed(2)})`);
+      // Close PositionV2 (will recompute PnL from fills)
+      await closePositionV2(positionV2.position_id, now);
+      
+      // Record PriceSnapshot
+      await createPriceSnapshot({
+        run_id: run.run_id,
+        ts: now,
+        symbol: positionV2.symbol,
+        price: currentPrice,
+      });
+      
+      // Update run capital - will be recalculated in updateRunCapitalWithUnrealizedPnl
+      await this.updateRunCapitalWithUnrealizedPnl(run);
+      
+      console.log(`   ✅ Closed ${positionV2.symbol} position: Order ${exitOrderId.substring(0, 8)}... Fill ${exitFillId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
     }
   }
 
@@ -515,9 +505,19 @@ class FakeTrader {
   ) {
     console.log(`\n  📊 Evaluating entry signals for ${symbol} @ $${candle.close} (${run.timeframe} candle: ${candle.ts})`);
     
-    // Get current positions for this symbol
-    const positions = await getCurrentPositions(run.run_id);
-    const symbolPositions = positions.filter(p => p.symbol === symbol);
+    // Get current positions V2 for this symbol
+    const positionsV2 = await getOpenPositionsV2(run.run_id);
+    const symbolPositionsV2 = positionsV2.filter(p => p.symbol === symbol);
+    
+    // Convert PositionV2 to format expected by strategy (for compatibility)
+    // Strategy expects FakePosition format, but we'll adapt
+    const symbolPositions = symbolPositionsV2.map(p => ({
+      symbol: p.symbol,
+      side: p.side,
+      size: p.quantity_open,
+      entry_price: p.entry_price_vwap || 0,
+      status: p.status.toLowerCase() as 'open',
+    }));
     
     // Prepare strategy state
     const strategyState = {
@@ -580,13 +580,11 @@ class FakeTrader {
     console.log(`     🎯 Entry Signal: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${candle.close} (${signal.reason})`);
     
     try {
-      // Check position limits BEFORE executing (check both legacy and canonical)
-      const currentPositions = await getCurrentPositions(run.run_id);
+      // Check position limits BEFORE executing
       const currentPositionsV2 = await getOpenPositionsV2(run.run_id);
-      const totalPositions = Math.max(currentPositions.length, currentPositionsV2.length);
       
-      if (totalPositions >= run.max_concurrent_positions) {
-        console.log(`     🚫 Position limit reached: ${totalPositions}/${run.max_concurrent_positions} - skipping signal`);
+      if (currentPositionsV2.length >= run.max_concurrent_positions) {
+        console.log(`     🚫 Position limit reached: ${currentPositionsV2.length}/${run.max_concurrent_positions} - skipping signal`);
         
         // Log the rejected signal
         await logSignal({
@@ -598,7 +596,7 @@ class FakeTrader {
           price: signal.price,
           candle_data: candle,
           executed: false,
-          rejection_reason: `position_limit_reached_${totalPositions}_of_${run.max_concurrent_positions}`,
+          rejection_reason: `position_limit_reached_${currentPositionsV2.length}_of_${run.max_concurrent_positions}`,
           signal_ts: new Date().toISOString()
         });
         
@@ -606,16 +604,10 @@ class FakeTrader {
       }
       
       // Check if there's already an open position for this symbol
-      const existingPositionForSymbol = currentPositions.find(p => p.symbol === signal.symbol);
-      
-      // Also check PositionV2
       const existingPositionV2 = await getOpenPositionV2BySymbol(run.run_id, signal.symbol);
       
-      if (existingPositionForSymbol || existingPositionV2) {
-        const existing = existingPositionForSymbol || existingPositionV2;
-        const side = existingPositionForSymbol?.side || existingPositionV2?.side;
-        const entryPrice = existingPositionForSymbol?.entry_price || existingPositionV2?.entry_price_vwap;
-        console.log(`     🚫 Already have open position for ${signal.symbol} (${side} @ $${entryPrice?.toFixed(4)}) - skipping new ${signal.side} signal`);
+      if (existingPositionV2) {
+        console.log(`     🚫 Already have open position for ${signal.symbol} (${existingPositionV2.side} @ $${existingPositionV2.entry_price_vwap?.toFixed(4)}) - skipping new ${signal.side} signal`);
         
         // Log the rejected signal
         await logSignal({
@@ -627,7 +619,7 @@ class FakeTrader {
           price: signal.price,
           candle_data: candle,
           executed: false,
-          rejection_reason: `existing_position_for_symbol_${side}_@_${entryPrice?.toFixed(4)}`,
+          rejection_reason: `existing_position_for_symbol_${existingPositionV2.side}_@_${existingPositionV2.entry_price_vwap?.toFixed(4)}`,
           signal_ts: new Date().toISOString()
         });
         
@@ -735,39 +727,6 @@ class FakeTrader {
       
       console.log(`     ✅ Opened ${signal.side} position: Order ${orderId.substring(0, 8)}... Fill ${fillId.substring(0, 8)}... Position ${positionId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
       
-      // Legacy: Also create Trade/Position for backward compatibility (can be removed later)
-      const tradeId = await createTrade({
-        run_id: run.run_id,
-        symbol: signal.symbol,
-        side: signal.side,
-        entry_ts: now,
-        qty: signal.size,
-        entry_px: executionPrice,
-        realized_pnl: 0,
-        unrealized_pnl: 0,
-        fees: fees,
-        reason: signal.reason,
-        leverage: signal.leverage || 1,
-        status: 'open'
-      });
-      
-      await createPosition({
-        run_id: run.run_id,
-        trade_id: tradeId,
-        symbol: signal.symbol,
-        side: signal.side,
-        size: signal.size,
-        entry_price: executionPrice,
-        current_price: executionPrice,
-        unrealized_pnl: 0,
-        cost_basis: marginRequired,
-        market_value: signal.size * executionPrice,
-        stop_loss: signal.stopLoss,
-        take_profit: signal.takeProfit,
-        leverage: signal.leverage || 1,
-        status: 'open'
-      });
-      
       // Log successful signal execution
       await logSignal({
         run_id: run.run_id,
@@ -802,142 +761,14 @@ class FakeTrader {
     }
   }
 
-  private async executeSignal(run: FakeTradeRun, signal: any, candle: Candle) {
-    console.log(`     🎯 Signal: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${candle.close} (${signal.reason})`);
+
+  private calculateUnrealizedPnLV2(position: PositionV2, currentPrice: number): number {
+    if (!position.entry_price_vwap) return 0;
     
-    try {
-      const executionPrice = candle.close; // Simplified execution at current price
-      const fees = signal.size * executionPrice * 0.0004; // 0.04% fees
-      
-      if (signal.side === 'LONG' || signal.side === 'SHORT') {
-        // Entry signal - check limits first
-        const currentPositions = await getCurrentPositions(run.run_id);
-        if (currentPositions.length >= run.max_concurrent_positions) {
-          console.log(`     🚫 Position limit reached: ${currentPositions.length}/${run.max_concurrent_positions} - skipping signal`);
-          return; // Exit early
-        }
-        
-        // Check if there's already an open position for this symbol
-        const existingPositionForSymbol = currentPositions.find(p => p.symbol === signal.symbol);
-        if (existingPositionForSymbol) {
-          console.log(`     🚫 Already have open position for ${signal.symbol} (${existingPositionForSymbol.side} @ $${existingPositionForSymbol.entry_price.toFixed(4)}) - skipping new ${signal.side} signal`);
-          return; // Exit early
-        }
-        
-        const positionCost = signal.size * executionPrice; // Cost of opening the position
-        
-        if (run.current_capital < (positionCost + fees)) {
-          console.log(`     💸 Insufficient capital: need $${(positionCost + fees).toFixed(2)}, have $${run.current_capital.toFixed(2)} - skipping signal`);
-          return; // Exit early
-        }
-        
-        // Update run capital - reduce by position cost + fees when opening position
-        const newCapital = run.current_capital - positionCost - fees;
-        await updateRunCapital(run.run_id, newCapital);
-        run.current_capital = newCapital; // Update local copy
-        
-        const tradeId = await createTrade({
-          run_id: run.run_id,
-          symbol: signal.symbol,
-          side: signal.side,
-          entry_ts: new Date().toISOString(),
-          qty: signal.size,
-          entry_px: executionPrice,
-          realized_pnl: 0,
-          unrealized_pnl: 0,
-          fees: fees,
-          reason: signal.reason,
-          leverage: signal.leverage || 1,
-          status: 'open'
-        });
-        
-        const positionId = await createPosition({
-          run_id: run.run_id,
-          trade_id: tradeId, // Link position to trade
-          symbol: signal.symbol,
-          side: signal.side,
-          size: signal.size,
-          entry_price: executionPrice,
-          current_price: executionPrice,
-          unrealized_pnl: 0,
-          cost_basis: signal.size * executionPrice,
-          market_value: signal.size * executionPrice,
-          stop_loss: signal.stopLoss,
-          take_profit: signal.takeProfit,
-          leverage: signal.leverage || 1,
-          status: 'open'
-        });
-        
-        console.log(`     ✅ Opened ${signal.side} position: Trade ${tradeId.substring(0, 8)}... Position ${positionId.substring(0, 8)}... (Capital: $${run.current_capital.toFixed(2)})`);
-        
-      } else {
-        // Exit signal - close existing position
-        const positions = await getCurrentPositions(run.run_id);
-        const position = positions.find(p => p.symbol === signal.symbol && p.status === 'open');
-        
-        if (position) {
-          const realizedPnl = this.calculateRealizedPnL(position, executionPrice);
-          const positionValue = position.size * executionPrice; // Value received from closing position
-          await closePosition(position.position_id, executionPrice, realizedPnl);
-          
-          console.log(`     ✅ Closed position: P&L $${realizedPnl.toFixed(2)}`);
-          
-          // Update run capital - add back position value and subtract fees
-          const newCapital = run.current_capital + positionValue - fees;
-          await updateRunCapital(run.run_id, newCapital);
-          run.current_capital = newCapital; // Update local copy
-          
-          console.log(`     💰 Capital updated: $${run.current_capital.toFixed(2)}`);
-        }
-      }
-      
-      // Log successful signal execution
-      await logSignal({
-        run_id: run.run_id,
-        symbol: signal.symbol,
-        signal_type: signal.side === 'LONG' || signal.side === 'SHORT' ? 'entry' : 'exit',
-        side: signal.side,
-        size: signal.size,
-        price: signal.price,
-        candle_data: candle,
-        executed: true,
-        execution_price: executionPrice,
-        execution_notes: `Executed ${signal.reason}`,
-        signal_ts: new Date().toISOString()
-      });
-      
-    } catch (error: any) {
-      console.error(`     ❌ Signal execution failed:`, error.message);
-      
-      // Log failed signal execution
-      await logSignal({
-        run_id: run.run_id,
-        symbol: signal.symbol,
-        signal_type: signal.side === 'LONG' || signal.side === 'SHORT' ? 'entry' : 'exit',
-        side: signal.side,
-        size: signal.size,
-        price: signal.price,
-        candle_data: candle,
-        executed: false,
-        execution_notes: `Execution failed: ${error.message}`,
-        signal_ts: new Date().toISOString()
-      });
-    }
-  }
-
-  private calculateUnrealizedPnL(position: FakePosition, currentPrice: number): number {
     if (position.side === 'LONG') {
-      return (currentPrice - position.entry_price) * position.size;
+      return (currentPrice - position.entry_price_vwap) * position.quantity_open;
     } else {
-      return (position.entry_price - currentPrice) * position.size;
-    }
-  }
-
-  private calculateRealizedPnL(position: FakePosition, exitPrice: number): number {
-    if (position.side === 'LONG') {
-      return (exitPrice - position.entry_price) * position.size;
-    } else {
-      return (position.entry_price - exitPrice) * position.size;
+      return (position.entry_price_vwap - currentPrice) * position.quantity_open;
     }
   }
 }
