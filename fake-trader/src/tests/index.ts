@@ -263,7 +263,7 @@ export async function testPartialFills(): Promise<TestResult> {
           params, status, starting_capital, current_capital, max_concurrent_positions,
           started_at, created_at
         ) VALUES (
-          $1, 'Test Run', ARRAY['TESTUSDT'], '15m', 'test', '1.0',
+          $1, 'TEST: Partial Fills Test', ARRAY['TESTUSDT'], '15m', 'test', '1.0',
           '{}', 'active', 10000, 10000, 10,
           NOW(), NOW()
         ) ON CONFLICT (run_id) DO NOTHING
