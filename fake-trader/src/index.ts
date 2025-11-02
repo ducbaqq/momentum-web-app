@@ -28,7 +28,20 @@ import {
   linkOrderToPosition,
   updateOrderStatus,
   updateOrderStatusFromFills,
+  getOrder,
+  getFill,
+  getPositionV2,
 } from './canonical-db.js';
+import {
+  logAccountSnapshot,
+  logOrderNew,
+  logOrderUpdate,
+  logFill,
+  logPositionOpened,
+  logPositionMark,
+  logPositionClosed,
+  logStrategyNote,
+} from './events.js';
 import { getStrategy } from './strategies.js';
 import type { FakeTradeRun, Candle, PositionV2 } from './types.js';
 
@@ -240,6 +253,20 @@ class FakeTrader {
         exposure_net: Math.abs(exposureNet),
         open_positions_count: positionsV2.length,
       });
+      
+      // Logging Contract: ACCOUNT_SNAPSHOT event
+      await logAccountSnapshot(run.run_id, {
+        snapshot_id: '',
+        run_id: run.run_id,
+        ts: new Date().toISOString(),
+        equity,
+        cash,
+        margin_used: marginUsed,
+        exposure_gross: exposureGross,
+        exposure_net: Math.abs(exposureNet),
+        open_positions_count: positionsV2.length,
+        created_at: new Date().toISOString(),
+      }, livePrices);
     } catch (error: any) {
       console.error(`Failed to create account snapshot for run ${run.run_id}:`, error.message);
     }
@@ -372,6 +399,9 @@ class FakeTrader {
       if (verboseLogging && position.entry_price_vwap) {
         const unrealizedPnl = this.calculateUnrealizedPnLV2(position, livePrice);
         console.log(`   📊 Updated ${position.symbol}: $${position.entry_price_vwap.toFixed(2)} → $${livePrice.toFixed(2)} (P&L: $${unrealizedPnl.toFixed(2)})`);
+        
+        // Logging Contract: POSITION_MARK event
+        await logPositionMark(run.run_id, position, livePrice, unrealizedPnl);
       }
       
       updatedCount++;
@@ -470,6 +500,12 @@ class FakeTrader {
         rejection_reason: undefined,
       });
       
+      // Logging Contract: ORDER_NEW event
+      const exitOrder = await getOrder(exitOrderId);
+      if (exitOrder) {
+        await logOrderNew(run.run_id, exitOrder);
+      }
+      
       // Create Fill for exit
       const exitFees = positionV2.quantity_open * currentPrice * 0.0004; // 0.04% fees
       const exitFillId = await createFill({
@@ -483,12 +519,29 @@ class FakeTrader {
         fee: exitFees,
       });
       
+      // Logging Contract: FILL event
+      const exitFill = await getFill(exitFillId);
+      if (exitFill && exitOrder) {
+        await logFill(run.run_id, exitFill, exitOrder);
+      }
+      
       // Update Order status based on fills (Order FSM: NEW → PARTIAL → FILLED)
       // createFill already calls updateOrderStatusFromFills, but we'll ensure it's updated
-      await updateOrderStatusFromFills(exitOrderId);
+      const orderStatusUpdate = await updateOrderStatusFromFills(exitOrderId);
+      if (orderStatusUpdate) {
+        // Logging Contract: ORDER_UPDATE event
+        await logOrderUpdate(run.run_id, exitOrderId, orderStatusUpdate.oldStatus, orderStatusUpdate.newStatus, now);
+      }
       
       // Close PositionV2 (will recompute PnL from fills and handle status transition)
+      const positionStatusUpdate = await updatePositionFromFills(positionV2.position_id);
       await closePositionV2(positionV2.position_id, now);
+      
+      // Logging Contract: POSITION_CLOSED event
+      const closedPosition = await getPositionV2(positionV2.position_id);
+      if (closedPosition) {
+        await logPositionClosed(run.run_id, closedPosition, currentPrice);
+      }
       
       // Record PriceSnapshot
       await createPriceSnapshot({
@@ -560,6 +613,14 @@ class FakeTrader {
           signal_ts: new Date().toISOString()
         });
         
+        // Logging Contract: STRATEGY_NOTE event
+        await logStrategyNote(run.run_id, new Date().toISOString(), `Signal rejected: run is winding down`, {
+          symbol: signal.symbol,
+          signal_type: 'entry',
+          side: signal.side,
+          reason: signal.reason,
+        });
+        
         continue; // Skip this signal
       }
       
@@ -609,6 +670,15 @@ class FakeTrader {
           signal_ts: new Date().toISOString()
         });
         
+        // Logging Contract: STRATEGY_NOTE event
+        await logStrategyNote(run.run_id, new Date().toISOString(), `Signal rejected: position limit reached`, {
+          symbol: signal.symbol,
+          side: signal.side,
+          reason: signal.reason,
+          current_positions: currentPositionsV2.length,
+          max_positions: run.max_concurrent_positions,
+        });
+        
         return; // Exit early - don't execute the signal
       }
       
@@ -636,6 +706,14 @@ class FakeTrader {
           signal_ts: new Date().toISOString()
         });
         
+        // Logging Contract: STRATEGY_NOTE event
+        await logStrategyNote(run.run_id, new Date().toISOString(), `Signal rejected: overlapping position detected`, {
+          symbol: signal.symbol,
+          side: signal.side,
+          reason: signal.reason,
+          overlap_side: signal.side === 'LONG' ? 'SHORT' : 'LONG',
+        });
+        
         return; // Exit early - don't execute the signal
       }
       
@@ -659,6 +737,15 @@ class FakeTrader {
             executed: false,
             rejection_reason: `existing_position_for_symbol_${existingPositionV2.side}_@_${existingPositionV2.entry_price_vwap?.toFixed(4)}_multi_mode_disabled`,
             signal_ts: new Date().toISOString()
+          });
+          
+          // Logging Contract: STRATEGY_NOTE event
+          await logStrategyNote(run.run_id, new Date().toISOString(), `Signal rejected: existing position for symbol (multi-mode disabled)`, {
+            symbol: signal.symbol,
+            side: signal.side,
+            reason: signal.reason,
+            existing_position_side: existingPositionV2.side,
+            existing_position_entry_price: existingPositionV2.entry_price_vwap,
           });
           
           return; // Exit early - don't execute the signal
@@ -690,6 +777,15 @@ class FakeTrader {
           signal_ts: new Date().toISOString()
         });
 
+        // Logging Contract: STRATEGY_NOTE event
+        await logStrategyNote(run.run_id, new Date().toISOString(), `Signal rejected: insufficient capital`, {
+          symbol: signal.symbol,
+          side: signal.side,
+          reason: signal.reason,
+          required_capital: marginRequired + fees,
+          available_capital: run.current_capital,
+        });
+
         return; // Exit early - don't execute the signal
       }
       
@@ -716,6 +812,12 @@ class FakeTrader {
         rejection_reason: undefined,
       });
       
+      // Logging Contract: ORDER_NEW event
+      const order = await getOrder(orderId);
+      if (order) {
+        await logOrderNew(run.run_id, order);
+      }
+      
       // Canonical Model: Create Fill (actual execution)
       const fillId = await createFill({
         order_id: orderId,
@@ -727,6 +829,12 @@ class FakeTrader {
         price: executionPrice, // Actual fill price
         fee: fees,
       });
+      
+      // Logging Contract: FILL event
+      const fill = await getFill(fillId);
+      if (fill && order) {
+        await logFill(run.run_id, fill, order);
+      }
       
       // Canonical Model: Create PositionV2 (aggregated view)
       // Position starts in NEW state (FSM: NEW → OPEN → CLOSED)
@@ -756,10 +864,22 @@ class FakeTrader {
       
       // Update Order status based on fills (Order FSM: NEW → PARTIAL → FILLED)
       // createFill already calls updateOrderStatusFromFills, but we'll ensure it's updated
-      await updateOrderStatusFromFills(orderId);
+      const orderStatusUpdate = await updateOrderStatusFromFills(orderId);
+      if (orderStatusUpdate) {
+        // Logging Contract: ORDER_UPDATE event
+        await logOrderUpdate(run.run_id, orderId, orderStatusUpdate.oldStatus, orderStatusUpdate.newStatus, now);
+      }
       
       // Update Position metrics from fills (Position FSM: NEW → OPEN after first fill)
-      await updatePositionFromFills(positionId);
+      const positionStatusUpdate = await updatePositionFromFills(positionId);
+      
+      // Logging Contract: POSITION_OPENED event (when position transitions from NEW to OPEN)
+      if (positionStatusUpdate.statusChanged && positionStatusUpdate.newStatus === 'OPEN') {
+        const position = await getPositionV2(positionId);
+        if (position) {
+          await logPositionOpened(run.run_id, position, executionPrice);
+        }
+      }
       
       // PnL and Fees Rule: Update capital after fees are paid
       // Fees are tracked in fills, so update capital to reflect fees deducted
@@ -790,6 +910,18 @@ class FakeTrader {
         signal_ts: new Date().toISOString()
       });
       
+      // Logging Contract: STRATEGY_NOTE event
+      await logStrategyNote(run.run_id, now, `Entry signal executed: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${executionPrice.toFixed(2)}`, {
+        symbol: signal.symbol,
+        side: signal.side,
+        size: signal.size,
+        execution_price: executionPrice,
+        reason: signal.reason,
+        order_id: orderId,
+        fill_id: fillId,
+        position_id: positionId,
+      });
+      
     } catch (error: any) {
       console.error(`     ❌ Entry signal execution failed:`, error.message);
       
@@ -805,6 +937,14 @@ class FakeTrader {
         executed: false,
         execution_notes: `Execution failed: ${error.message}`,
         signal_ts: new Date().toISOString()
+      });
+      
+      // Logging Contract: STRATEGY_NOTE event
+      await logStrategyNote(run.run_id, new Date().toISOString(), `Signal execution failed: ${error.message}`, {
+        symbol: signal.symbol,
+        side: signal.side,
+        reason: signal.reason,
+        error: error.message,
       });
     }
   }

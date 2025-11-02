@@ -34,7 +34,7 @@ export async function createOrder(order: Omit<Order, 'order_id' | 'created_at' |
   return result.rows[0].order_id;
 }
 
-export async function updateOrderStatus(orderId: string, status: Order['status']): Promise<void> {
+export async function updateOrderStatus(orderId: string, status: Order['status'], rejectionReason?: string): Promise<void> {
   // Validate state transition
   const currentOrder = await pool.query('SELECT status FROM ft_orders WHERE order_id = $1', [orderId]);
   if (currentOrder.rows.length === 0) {
@@ -58,11 +58,11 @@ export async function updateOrderStatus(orderId: string, status: Order['status']
   
   const query = `
     UPDATE ft_orders 
-    SET status = $2, updated_at = NOW()
+    SET status = $2, rejection_reason = $3, updated_at = NOW()
     WHERE order_id = $1
   `;
   
-  await pool.query(query, [orderId, status]);
+  await pool.query(query, [orderId, status, rejectionReason || null]);
 }
 
 /**
@@ -71,10 +71,10 @@ export async function updateOrderStatus(orderId: string, status: Order['status']
  * NEW → CANCELLED
  * NEW → REJECTED
  */
-export async function updateOrderStatusFromFills(orderId: string): Promise<void> {
+export async function updateOrderStatusFromFills(orderId: string): Promise<{ oldStatus: string; newStatus: string } | null> {
   // Get order details
   const orderResult = await pool.query('SELECT qty, status FROM ft_orders WHERE order_id = $1', [orderId]);
-  if (orderResult.rows.length === 0) return;
+  if (orderResult.rows.length === 0) return null;
   
   const order = orderResult.rows[0];
   const orderQty = Number(order.qty);
@@ -82,7 +82,7 @@ export async function updateOrderStatusFromFills(orderId: string): Promise<void>
   
   // If order is already terminal, don't update
   if (['FILLED', 'CANCELLED', 'REJECTED'].includes(currentStatus)) {
-    return;
+    return null;
   }
   
   // Get total filled quantity
@@ -94,18 +94,54 @@ export async function updateOrderStatusFromFills(orderId: string): Promise<void>
   const totalFilled = Number(fillsResult.rows[0]?.total_filled || 0);
   
   // Determine new status based on fills
+  let newStatus = currentStatus;
   if (totalFilled >= orderQty) {
     // Fully filled
     if (currentStatus !== 'FILLED') {
+      newStatus = 'FILLED';
       await updateOrderStatus(orderId, 'FILLED');
     }
   } else if (totalFilled > 0) {
     // Partially filled
     if (currentStatus !== 'PARTIAL') {
+      newStatus = 'PARTIAL';
       await updateOrderStatus(orderId, 'PARTIAL');
     }
   }
   // If totalFilled === 0, order remains NEW
+  
+  return newStatus !== currentStatus ? { oldStatus: currentStatus, newStatus } : null;
+}
+
+export async function getOrder(orderId: string): Promise<Order | null> {
+  const query = 'SELECT * FROM ft_orders WHERE order_id = $1';
+  const result = await pool.query(query, [orderId]);
+  if (result.rows.length === 0) return null;
+  
+  const row = result.rows[0];
+  return {
+    ...row,
+    position_id: row.position_id || undefined,
+    price: row.price ? Number(row.price) : undefined,
+    qty: Number(row.qty),
+    reason_tag: row.reason_tag || undefined,
+    rejection_reason: row.rejection_reason || undefined,
+  };
+}
+
+export async function getFill(fillId: string): Promise<Fill | null> {
+  const query = 'SELECT * FROM ft_fills WHERE fill_id = $1';
+  const result = await pool.query(query, [fillId]);
+  if (result.rows.length === 0) return null;
+  
+  const row = result.rows[0];
+  return {
+    ...row,
+    position_id: row.position_id || undefined,
+    qty: Number(row.qty),
+    price: Number(row.price),
+    fee: Number(row.fee),
+  };
 }
 
 export async function linkOrderToPosition(orderId: string, positionId: string): Promise<void> {
@@ -148,6 +184,26 @@ export async function createFill(fill: Omit<Fill, 'fill_id' | 'created_at'>): Pr
   await updateOrderStatusFromFills(fill.order_id);
   
   return fillId;
+}
+
+export async function getPositionV2(positionId: string): Promise<PositionV2 | null> {
+  const query = 'SELECT * FROM ft_positions_v2 WHERE position_id = $1';
+  const result = await pool.query(query, [positionId]);
+  if (result.rows.length === 0) return null;
+  
+  const row = result.rows[0];
+  return {
+    ...row,
+    close_ts: row.close_ts || undefined,
+    entry_price_vwap: row.entry_price_vwap ? Number(row.entry_price_vwap) : undefined,
+    exit_price_vwap: row.exit_price_vwap ? Number(row.exit_price_vwap) : undefined,
+    quantity_open: Number(row.quantity_open),
+    quantity_close: Number(row.quantity_close),
+    cost_basis: Number(row.cost_basis),
+    fees_total: Number(row.fees_total),
+    realized_pnl: Number(row.realized_pnl),
+    leverage_effective: Number(row.leverage_effective),
+  };
 }
 
 export async function getFillsForPosition(positionId: string): Promise<Fill[]> {
@@ -291,17 +347,25 @@ export async function hasOverlappingPosition(runId: string, symbol: string, side
   return Number(result.rows[0]?.count || 0) > 0;
 }
 
-export async function updatePositionFromFills(positionId: string): Promise<void> {
+export async function updatePositionFromFills(positionId: string): Promise<{ oldStatus: string; newStatus: string; statusChanged: boolean }> {
   // Compute position metrics from fills
   const fills = await getFillsForPosition(positionId);
   
   if (fills.length === 0) {
-    return; // No fills to aggregate
+    // Return default if no fills
+    const positionQuery = await pool.query('SELECT status FROM ft_positions_v2 WHERE position_id = $1', [positionId]);
+    if (positionQuery.rows.length === 0) {
+      throw new Error(`Position ${positionId} not found`);
+    }
+    const currentStatus = positionQuery.rows[0].status;
+    return { oldStatus: currentStatus, newStatus: currentStatus, statusChanged: false };
   }
   
   // Get position details
   const positionQuery = await pool.query('SELECT * FROM ft_positions_v2 WHERE position_id = $1', [positionId]);
-  if (positionQuery.rows.length === 0) return;
+  if (positionQuery.rows.length === 0) {
+    throw new Error(`Position ${positionId} not found`);
+  }
   
   const position = positionQuery.rows[0];
   const side = position.side;
@@ -372,15 +436,18 @@ export async function updatePositionFromFills(positionId: string): Promise<void>
   
   // Position FSM: NEW → OPEN → CLOSED
   let newStatus = currentStatus;
+  let statusChanged = false;
   
   // Transition: NEW → OPEN (when first fill happens)
   if (currentStatus === 'NEW' && fills.length > 0) {
     newStatus = 'OPEN';
+    statusChanged = true;
   }
   
   // Transition: OPEN → CLOSED (when position is flat after exit fills)
   if (currentStatus === 'OPEN' && quantityOpen <= 0 && exitFills.length > 0) {
     newStatus = 'CLOSED';
+    statusChanged = true;
   }
   
   // Update position
@@ -406,6 +473,8 @@ export async function updatePositionFromFills(positionId: string): Promise<void>
     realizedPnl,
     newStatus,
   ]);
+  
+  return { oldStatus: currentStatus, newStatus, statusChanged };
 }
 
 export async function closePositionV2(positionId: string, closeTs: string): Promise<void> {
