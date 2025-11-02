@@ -260,7 +260,7 @@ class FakeTrader {
       await updateRunStatus(run.run_id, 'stopped', `Safety stop: Too many open positions (${currentPositionsV2.length} vs limit ${run.max_concurrent_positions})`);
       
       // Force close all positions  
-      await pool.query(`UPDATE ft_positions_v2 SET status = 'CLOSED' WHERE run_id = $1 AND status = 'OPEN'`, [run.run_id]);
+      await pool.query(`UPDATE ft_positions_v2 SET status = 'CLOSED' WHERE run_id = $1 AND status IN ('NEW', 'OPEN')`, [run.run_id]);
       console.log(`   🔄 Force closed ${currentPositionsV2.length} positions`);
       
       return;
@@ -477,10 +477,11 @@ class FakeTrader {
         fee: exitFees,
       });
       
-      // Update Order status to FILLED
-      await updateOrderStatus(exitOrderId, 'FILLED');
+      // Update Order status based on fills (Order FSM: NEW → PARTIAL → FILLED)
+      // createFill already calls updateOrderStatusFromFills, but we'll ensure it's updated
+      await updateOrderStatusFromFills(exitOrderId);
       
-      // Close PositionV2 (will recompute PnL from fills)
+      // Close PositionV2 (will recompute PnL from fills and handle status transition)
       await closePositionV2(positionV2.position_id, now);
       
       // Record PriceSnapshot
