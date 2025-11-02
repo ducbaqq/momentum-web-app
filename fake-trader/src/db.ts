@@ -202,6 +202,31 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
 
     const result = await pool.query(query, [symbols, startTime.toISOString(), endTime.toISOString()]);
     console.log(`🔍 [FAKE TRADER] Found ${result.rows.length} 1-minute candles across ${symbols.length} symbols`);
+    
+    // If no recent data found, try to get the latest available data (fallback for when collector is stopped)
+    if (result.rows.length === 0) {
+      console.log(`⚠️  No recent data found. Attempting to fetch latest available data...`);
+      const fallbackQuery = `
+        SELECT DISTINCT ON (o.symbol)
+          o.symbol,
+          o.ts,
+          o.open, o.high, o.low, o.close, o.volume, o.trades_count, o.vwap_minute,
+          f.roc_1m, f.roc_5m, f.roc_15m, f.roc_30m, f.roc_1h, f.roc_4h,
+          f.rsi_14, f.ema_12, f.ema_20, f.ema_26, f.ema_50, f.macd, f.macd_signal,
+          f.bb_upper, f.bb_lower, f.bb_basis, f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
+        FROM ohlcv_1m o
+        LEFT JOIN features_1m f ON f.symbol=o.symbol AND f.ts=o.ts
+        WHERE o.symbol = ANY($1)
+        ORDER BY o.symbol, o.ts DESC
+      `;
+      const fallbackResult = await pool.query(fallbackQuery, [symbols]);
+      if (fallbackResult.rows.length > 0) {
+        const latestTs = fallbackResult.rows[0].ts;
+        console.log(`⚠️  Found latest available data timestamp: ${latestTs}`);
+        console.log(`⚠️  Data collector appears to be stopped. Consider restarting it.`);
+      }
+    }
+    
     return processCandlesResult(result, symbols);
   }
 
@@ -270,6 +295,21 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
 
   const result = await pool.query(query, [symbols, startTime.toISOString(), endTime.toISOString(), timeframeMinutes]);
   console.log(`🔍 [FAKE TRADER] Found ${result.rows.length} ${timeframe} candles across ${symbols.length} symbols`);
+  
+  // If no recent data found, warn about collector status
+  if (result.rows.length === 0) {
+    console.log(`⚠️  No recent ${timeframe} data found. Checking latest available data...`);
+    const latestCheck = await pool.query(`
+      SELECT MAX(ts) as latest_ts FROM ohlcv_1m WHERE symbol = ANY($1)
+    `, [symbols]);
+    if (latestCheck.rows[0]?.latest_ts) {
+      const latestTs = latestCheck.rows[0].latest_ts;
+      const hoursAgo = (Date.now() - new Date(latestTs).getTime()) / (1000 * 60 * 60);
+      console.log(`⚠️  Latest available data: ${latestTs} (${hoursAgo.toFixed(1)} hours ago)`);
+      console.log(`⚠️  Data collector appears to be stopped. Consider restarting it.`);
+    }
+  }
+  
   return processCandlesResult(result, symbols);
 }
 
