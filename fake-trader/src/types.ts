@@ -151,3 +151,79 @@ export interface Candle {
   trades_count?: number | null; // From ohlcv_1m table
   vwap_minute?: number | null;  // From ohlcv_1m table
 }
+
+// ============================================================================
+// Canonical Data Model Types
+// ============================================================================
+
+export interface AccountSnapshot {
+  snapshot_id: string;
+  run_id: string;
+  ts: string; // ISO timestamp
+  equity: number;
+  cash: number;
+  margin_used: number;
+  exposure_gross: number;
+  exposure_net: number;
+  open_positions_count: number;
+  created_at: string;
+}
+
+export interface PositionV2 {
+  position_id: string;
+  run_id: string;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  status: 'OPEN' | 'CLOSED';
+  open_ts: string;
+  close_ts?: string;
+  entry_price_vwap?: number;
+  exit_price_vwap?: number;
+  quantity_open: number;
+  quantity_close: number;
+  cost_basis: number;
+  fees_total: number;
+  realized_pnl: number; // Computed from fills, never stored directly
+  leverage_effective: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Order {
+  order_id: string;
+  position_id?: string;
+  run_id: string;
+  symbol: string;
+  ts: string; // ISO timestamp
+  side: 'LONG' | 'SHORT';
+  type: 'ENTRY' | 'EXIT' | 'ADJUST';
+  qty: number;
+  price?: number; // Intended price (may differ from fill price)
+  status: 'NEW' | 'PARTIAL' | 'FILLED' | 'CANCELLED' | 'REJECTED';
+  reason_tag?: string; // e.g., 'momentum_breakout_v2_15m', 'stop_loss', 'take_profit'
+  rejection_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Fill {
+  fill_id: string;
+  order_id: string;
+  position_id?: string;
+  run_id: string;
+  symbol: string;
+  ts: string; // ISO timestamp
+  qty: number;
+  price: number;
+  fee: number;
+  created_at: string;
+}
+
+export interface PriceSnapshot {
+  snapshot_id: string;
+  run_id: string;
+  ts: string; // ISO timestamp
+  symbol: string;
+  price: number;
+  created_at: string;
+}
