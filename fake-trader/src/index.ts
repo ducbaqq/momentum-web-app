@@ -177,9 +177,22 @@ class FakeTrader {
       return;
     }
     
-    console.log(`📈 Processing ${activeRuns.length} active trading runs`);
+    // Filter out test runs (runs with "TEST: " prefix)
+    const productionRuns = activeRuns.filter(run => !run.name?.startsWith('TEST: '));
+    const testRuns = activeRuns.filter(run => run.name?.startsWith('TEST: '));
     
-    for (const run of activeRuns) {
+    if (testRuns.length > 0) {
+      console.log(`🧪 Skipping ${testRuns.length} test run(s): ${testRuns.map(r => r.name || r.run_id.substring(0, 8)).join(', ')}`);
+    }
+    
+    if (productionRuns.length === 0) {
+      console.log('📭 No production trading runs to process');
+      return;
+    }
+    
+    console.log(`📈 Processing ${productionRuns.length} active trading runs`);
+    
+    for (const run of productionRuns) {
       try {
         await this.processRun(run);
       } catch (error: any) {
@@ -190,8 +203,8 @@ class FakeTrader {
     
     console.log('✅ Trading cycle completed');
     
-    // Create AccountSnapshot for all active runs
-    for (const run of activeRuns) {
+    // Create AccountSnapshot for all active production runs
+    for (const run of productionRuns) {
       await this.createAccountSnapshot(run);
     }
   }
