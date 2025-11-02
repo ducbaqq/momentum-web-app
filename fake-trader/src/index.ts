@@ -91,9 +91,18 @@ class FakeTrader {
     try {
       // Get active runs and check their last update times
       const activeRuns = await getActiveRuns();
+      
+      // Filter out test runs from downtime recovery
+      const productionRuns = activeRuns.filter(run => !run.name?.startsWith('TEST: '));
+      
+      if (productionRuns.length === 0) {
+        console.log('✅ No production runs need downtime recovery');
+        return;
+      }
+      
       const now = new Date();
       
-      for (const run of activeRuns) {
+      for (const run of productionRuns) {
         const lastUpdate = new Date(run.last_update || now.toISOString());
         const minutesSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
         
@@ -116,7 +125,7 @@ class FakeTrader {
         }
       }
       
-      console.log(`✅ Downtime recovery completed for ${activeRuns.length} active runs`);
+      console.log(`✅ Downtime recovery completed for ${productionRuns.length} active runs`);
     } catch (error) {
       console.error('❌ Downtime recovery failed:', error);
     }
