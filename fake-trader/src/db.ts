@@ -729,7 +729,7 @@ export async function updatePosition(positionId: string, currentPrice: number, u
 // Close position
 export async function closePosition(positionId: string, exitPrice: number, realizedPnl: number): Promise<void> {
   // First, get the trade_id from the position
-  const positionQuery = await pool.query(
+  const positionQuery = await tradingPool.query(
     'SELECT trade_id FROM ft_positions WHERE position_id = $1',
     [positionId]
   );
@@ -752,7 +752,7 @@ export async function closePosition(positionId: string, exitPrice: number, reali
       ORDER BY entry_ts DESC
       LIMIT 1
     `;
-    await pool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
+    await tradingPool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
   } else {
     // Use trade_id for precise matching
     const updateTradeQuery = `
@@ -760,7 +760,7 @@ export async function closePosition(positionId: string, exitPrice: number, reali
       SET exit_ts = NOW(), exit_px = $2, realized_pnl = $3, status = 'closed'
       WHERE trade_id = $1
     `;
-    await pool.query(updateTradeQuery, [tradeId, exitPrice, realizedPnl]);
+    await tradingPool.query(updateTradeQuery, [tradeId, exitPrice, realizedPnl]);
   }
   
   // Update position status
