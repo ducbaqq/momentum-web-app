@@ -24,9 +24,9 @@ if (!process.env.STAGING_DATABASE_URL) {
 
 const stagingPool = new Pool({
   connectionString: process.env.STAGING_DATABASE_URL,
-  ssl: process.env.STAGING_DATABASE_URL?.includes('ondigitalocean') || process.env.STAGING_DATABASE_URL?.includes('ssl') 
-    ? { rejectUnauthorized: false } 
-    : false,
+  // Always disable SSL certificate verification for staging databases
+  // (they typically use self-signed certificates)
+  ssl: { rejectUnauthorized: false },
 });
 
 async function setupStagingDatabase() {
