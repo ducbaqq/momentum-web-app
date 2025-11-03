@@ -22,19 +22,31 @@ if (!process.env.STAGING_DATABASE_URL) {
   process.exit(1);
 }
 
-// Parse connection string and ensure SSL mode is set correctly
+// Parse connection string and handle SSL properly
 let connectionString = process.env.STAGING_DATABASE_URL!;
-// Remove sslmode if present and add our own
+// Remove sslmode if present - we'll handle SSL via Pool config instead
 connectionString = connectionString.replace(/[?&]sslmode=[^&]*/g, '');
-// Add sslmode=require but we'll override with rejectUnauthorized: false
-const separator = connectionString.includes('?') ? '&' : '?';
-connectionString = `${connectionString}${separator}sslmode=require`;
+
+// Support SSL certificate file if provided via env var
+const sslCertPath = process.env.STAGING_SSL_CERT_PATH;
+let sslConfig: any = false;
+
+if (sslCertPath && fs.existsSync(sslCertPath)) {
+  // Use provided certificate
+  sslConfig = {
+    ca: fs.readFileSync(sslCertPath).toString(),
+    rejectUnauthorized: true
+  };
+  console.log(`📜 Using SSL certificate from: ${sslCertPath}`);
+} else {
+  // Disable certificate verification for self-signed certificates
+  sslConfig = { rejectUnauthorized: false };
+  console.log('⚠️  SSL certificate verification disabled (self-signed certificate)');
+}
 
 const stagingPool = new Pool({
   connectionString,
-  // Always disable SSL certificate verification for staging databases
-  // (they typically use self-signed certificates)
-  ssl: { rejectUnauthorized: false },
+  ssl: sslConfig,
 });
 
 async function setupStagingDatabase() {
