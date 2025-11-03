@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS ft_runs (
     started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     last_update TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     stopped_at TIMESTAMP WITH TIME ZONE,
+    last_processed_candle TIMESTAMP WITH TIME ZONE,
     
     -- Error handling
     error TEXT,
