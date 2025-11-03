@@ -65,22 +65,56 @@ function processCandlesResult(result: any, symbols: string[]): Record<string, Ca
   return candlesBySymbol;
 }
 
-// Initialize database connection
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-});
+// Initialize database connections
+// - dataPool: For reading OHLCV/features from momentum_collector (DATABASE_URL)
+// - tradingPool: For reading/writing fake trader data (STAGING_DATABASE_URL if set, otherwise DATABASE_URL)
+
+function createPool(connectionString: string | undefined, defaultUrl: string): Pool {
+  const url = connectionString || defaultUrl;
+  const isDigitalOcean = url.includes('ondigitalocean') || url.includes('ssl');
+  
+  return new Pool({
+    connectionString: url,
+    ssl: isDigitalOcean ? { rejectUnauthorized: false } : false,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+}
+
+// Data pool: Always uses DATABASE_URL for reading OHLCV/features from momentum_collector
+export const dataPool = createPool(process.env.DATABASE_URL, 'postgresql://localhost/momentum_collector');
+
+// Trading pool: Uses STAGING_DATABASE_URL if set (for staging), otherwise DATABASE_URL (for dev)
+const tradingDbUrl = process.env.STAGING_DATABASE_URL || process.env.DATABASE_URL;
+export const tradingPool = createPool(tradingDbUrl, 'postgresql://localhost/momentum_collector');
+
+// Legacy export for backward compatibility (uses trading pool)
+export const pool = tradingPool;
+
+// Log which databases are being used
+if (process.env.STAGING_DATABASE_URL) {
+  console.log('📊 Dual database mode enabled:');
+  console.log(`  📖 Reading OHLCV/features from: ${process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || 'DATABASE_URL'}`);
+  console.log(`  ✍️  Writing fake trader data to: ${process.env.STAGING_DATABASE_URL?.split('@')[1]?.split('/')[0] || 'STAGING_DATABASE_URL'}`);
+} else {
+  console.log('📊 Single database mode: Using DATABASE_URL for all operations');
+}
 
 // Test connection
 export async function testConnection(): Promise<void> {
   try {
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
-    console.log('✓ Database connected successfully');
+    // Test data pool (for reading OHLCV/features)
+    const dataClient = await dataPool.connect();
+    await dataClient.query('SELECT 1');
+    dataClient.release();
+    
+    // Test trading pool (for fake trader data)
+    const tradingClient = await tradingPool.connect();
+    await tradingClient.query('SELECT 1');
+    tradingClient.release();
+    
+    console.log('✓ Database connections successful');
   } catch (error) {
     console.error('✗ Database connection failed:', error);
     throw error;
@@ -96,13 +130,13 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
   `;
   
   console.log('[DB] Querying for active runs...');
-  const result = await pool.query(query);
+  const result = await tradingPool.query(query);
   console.log(`[DB] Found ${result.rows.length} runs with status 'active' or 'winding_down'`);
   
   // Log all runs and their statuses for debugging
   if (result.rows.length === 0) {
     // Check if there are ANY runs at all
-    const allRunsQuery = await pool.query('SELECT run_id, name, status FROM ft_runs ORDER BY created_at DESC LIMIT 5');
+    const allRunsQuery = await tradingPool.query('SELECT run_id, name, status FROM ft_runs ORDER BY created_at DESC LIMIT 5');
     console.log(`[DB] Total runs in database: ${allRunsQuery.rows.length}`);
     if (allRunsQuery.rows.length > 0) {
       console.log('[DB] Sample runs:', allRunsQuery.rows.map(r => `${r.run_id.substring(0, 8)}... - ${r.name || 'unnamed'} - status: ${r.status}`));
@@ -119,6 +153,7 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
 }
 
 // Get live ticker prices (most recent 1m candle for position management)
+// Uses dataPool to read from momentum_collector
 export async function getLivePrices(symbols: string[]): Promise<Record<string, number>> {
   const query = `
     SELECT DISTINCT ON (symbol) 
@@ -130,7 +165,7 @@ export async function getLivePrices(symbols: string[]): Promise<Record<string, n
     ORDER BY symbol, ts DESC
   `;
   
-  const result = await pool.query(query, [symbols]);
+  const result = await dataPool.query(query, [symbols]);
   
   const prices: Record<string, number> = {};
   for (const row of result.rows) {
@@ -200,7 +235,7 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
       ORDER BY o.symbol, o.ts ASC
     `;
 
-    const result = await pool.query(query, [symbols, startTime.toISOString(), endTime.toISOString()]);
+    const result = await dataPool.query(query, [symbols, startTime.toISOString(), endTime.toISOString()]);
     console.log(`🔍 [FAKE TRADER] Found ${result.rows.length} 1-minute candles across ${symbols.length} symbols`);
     return processCandlesResult(result, symbols);
   }
@@ -268,7 +303,7 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
     SELECT * FROM agg ORDER BY symbol, ts ASC
   `;
 
-  const result = await pool.query(query, [symbols, startTime.toISOString(), endTime.toISOString(), timeframeMinutes]);
+  const result = await dataPool.query(query, [symbols, startTime.toISOString(), endTime.toISOString(), timeframeMinutes]);
   console.log(`🔍 [FAKE TRADER] Found ${result.rows.length} ${timeframe} candles across ${symbols.length} symbols`);
   return processCandlesResult(result, symbols);
 }
@@ -326,7 +361,7 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
     ORDER BY symbol
   `;
   
-  const result = await pool.query(query, [symbols, targetPeriod.toISOString(), periodEnd.toISOString()]);
+  const result = await dataPool.query(query, [symbols, targetPeriod.toISOString(), periodEnd.toISOString()]);
   
   console.log(`🔍 [FAKE TRADER] Query returned ${result.rows.length} rows for target period ${targetPeriod.toISOString()}`);
   if (result.rows.length > 0) {
@@ -385,7 +420,7 @@ export async function hasNew15mCandles(symbols: string[], lastCheckTime?: string
     FROM current_15m_periods
   `;
   
-  const result = await pool.query(query, [symbols, timeThreshold]);
+  const result = await dataPool.query(query, [symbols, timeThreshold]);
   return parseInt(result.rows[0].new_count) > 0;
 }
 
@@ -397,7 +432,7 @@ export async function updateLastProcessedCandle(runId: string, symbol: string, t
     WHERE run_id = $1
   `;
   
-  await pool.query(query, [runId, timestamp]);
+  await tradingPool.query(query, [runId, timestamp]);
 }
 
 // Get last processed candle timestamp for run and symbol
@@ -457,7 +492,7 @@ export async function getCurrentCandles(symbols: string[]): Promise<Record<strin
     LEFT JOIN latest_features f ON f.symbol = c.symbol AND f.ts = c.ts
   `;
   
-  const result = await pool.query(query, [symbols]);
+  const result = await dataPool.query(query, [symbols]);
   
   const candles: Record<string, Candle> = {};
   for (const row of result.rows) {
@@ -530,7 +565,7 @@ export async function createTrade(trade: Omit<FakeTrade, 'trade_id' | 'created_a
     trade.realized_pnl, trade.unrealized_pnl, trade.fees, trade.reason, trade.leverage, trade.status
   ];
   
-  const result = await pool.query(query, values);
+  const result = await tradingPool.query(query, values);
   return result.rows[0].trade_id;
 }
 
@@ -550,7 +585,7 @@ export async function createPosition(position: Omit<FakePosition, 'position_id' 
     position.leverage, position.status
   ];
   
-  const result = await pool.query(query, values);
+  const result = await tradingPool.query(query, values);
   return result.rows[0].position_id;
 }
 
@@ -562,7 +597,7 @@ export async function updatePosition(positionId: string, currentPrice: number, u
     WHERE position_id = $1
   `;
   
-  await pool.query(query, [positionId, currentPrice, unrealizedPnl, marketValue]);
+  await tradingPool.query(query, [positionId, currentPrice, unrealizedPnl, marketValue]);
 }
 
 // Close position
@@ -573,7 +608,7 @@ export async function closePosition(positionId: string, exitPrice: number, reali
     WHERE position_id = $1
   `;
   
-  await pool.query(query, [positionId, exitPrice]);
+  await tradingPool.query(query, [positionId, exitPrice]);
   
   // Also update the corresponding trade
   const updateTradeQuery = `
@@ -584,7 +619,7 @@ export async function closePosition(positionId: string, exitPrice: number, reali
     AND status = 'open'
   `;
   
-  await pool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
+  await tradingPool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
 }
 
 // Log strategy signal
@@ -602,7 +637,7 @@ export async function logSignal(signal: Omit<FakeSignal, 'signal_id' | 'created_
     signal.executed, signal.execution_price, signal.execution_notes, signal.signal_ts
   ];
   
-  await pool.query(query, values);
+  await tradingPool.query(query, values);
 }
 
 // Update run status
@@ -613,7 +648,7 @@ export async function updateRunStatus(runId: string, status: string, error?: str
     WHERE run_id = $1
   `;
   
-  await pool.query(query, [runId, status, error]);
+  await tradingPool.query(query, [runId, status, error]);
 }
 
 // Get trades for a run
@@ -645,5 +680,5 @@ export async function updateRunCapital(runId: string, currentCapital: number): P
     WHERE run_id = $1
   `;
 
-  await pool.query(query, [runId, currentCapital]);
+  await tradingPool.query(query, [runId, currentCapital]);
 }
