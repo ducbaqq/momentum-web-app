@@ -339,7 +339,7 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
         WHERE o.symbol = ANY($1)
         ORDER BY o.symbol, o.ts DESC
       `;
-      const fallbackResult = await pool.query(fallbackQuery, [symbols]);
+      const fallbackResult = await dataPool.query(fallbackQuery, [symbols]);
       if (fallbackResult.rows.length > 0) {
         const latestTs = fallbackResult.rows[0].ts;
         console.log(`⚠️  Found latest available data timestamp: ${latestTs}`);
@@ -419,7 +419,7 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
   // If no recent data found, warn about collector status
   if (result.rows.length === 0) {
     console.log(`⚠️  No recent ${timeframe} data found. Checking latest available data...`);
-    const latestCheck = await pool.query(`
+    const latestCheck = await dataPool.query(`
       SELECT MAX(ts) as latest_ts FROM ohlcv_1m WHERE symbol = ANY($1)
     `, [symbols]);
     if (latestCheck.rows[0]?.latest_ts) {
