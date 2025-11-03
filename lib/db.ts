@@ -68,7 +68,7 @@ function createPool(connectionString: string | undefined, defaultUrl: string): P
   //   - web-app (dev + staging): 4 pools × 3 = 12 connections
   //   - momentum-collector: 1 pool × 6 = 6 connections
   //   Total: ~30 connections (well below typical 100 connection limit)
-  const maxConnections = parseInt(process.env.DB_POOL_MAX || '3', 10);
+  const maxConnections = parseInt(process.env.DB_POOL_MAX || '5', 10);
   
   const pool = new Pool({
     connectionString: url,
