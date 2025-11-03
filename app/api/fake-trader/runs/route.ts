@@ -206,14 +206,23 @@ export async function GET(req: NextRequest) {
         const runId = row.run_id;
 
         // Get latest account snapshot
-        const snapshotQuery = `
-          SELECT equity, cash, margin_used, exposure_gross, exposure_net, open_positions_count
-          FROM ft_account_snapshots
-          WHERE run_id = $1
-          ORDER BY ts DESC
-          LIMIT 1
-        `;
-        const snapshotResult = await pool.query(snapshotQuery, [runId]);
+        // Try to get latest account snapshot (may not exist if canonical tables not migrated)
+        let snapshotResult;
+        try {
+          const snapshotQuery = `
+            SELECT equity, cash, margin_used, exposure_gross, exposure_net, open_positions_count
+            FROM ft_account_snapshots
+            WHERE run_id = $1
+            ORDER BY ts DESC
+            LIMIT 1
+          `;
+          snapshotResult = await pool.query(snapshotQuery, [runId]);
+        } catch (error: any) {
+          if (error.message.includes('does not exist')) {
+            throw new Error('Canonical tables not found. Please run migration: POST /api/migrate');
+          }
+          throw error;
+        }
 
         // Get open positions for unrealized PnL calculation
         const openPositionsQuery = `
