@@ -62,3 +62,4 @@ coverage/
 backtest-worker/dist
 fake-trader/dist
 real-trader/dist
+certificates/

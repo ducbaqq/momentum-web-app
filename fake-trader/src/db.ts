@@ -139,13 +139,29 @@ function createPool(connectionString: string | undefined, defaultUrl: string): P
   const url = connectionString || defaultUrl;
   const isDigitalOcean = url.includes('ondigitalocean') || url.includes('ssl') || url.includes('sslmode=require');
   
-  return new Pool({
+  // Reduce pool size to prevent connection exhaustion when multiple services share the same DB instance
+  // Default: 3 connections per pool (can be overridden via DB_POOL_MAX env var)
+  // Total connections with current setup:
+  //   - fake-trader (dev + staging): 4 pools × 3 = 12 connections
+  //   - web-app (dev + staging): 4 pools × 3 = 12 connections
+  //   - momentum-collector: 1 pool × 6 = 6 connections
+  //   Total: ~30 connections (well below typical 100 connection limit)
+  const maxConnections = parseInt(process.env.DB_POOL_MAX || '5', 10);
+  
+  const pool = new Pool({
     connectionString: url,
     ssl: isDigitalOcean ? { rejectUnauthorized: false } : false,
-    max: 10,
+    max: maxConnections,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
   });
+  
+  // Log pool errors
+  pool.on('error', (err) => {
+    console.error('❌ Unexpected database pool error:', err);
+  });
+  
+  return pool;
 }
 
 // Get database URLs based on environment configuration
