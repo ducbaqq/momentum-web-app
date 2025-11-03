@@ -285,7 +285,7 @@ export default function FakeTraderPage() {
     fetchRuns();
   }, []);
 
-  // Poll for status updates every 5 seconds
+  // Poll for status updates every minute (or on page load/reload)
   useEffect(() => {
     const interval = setInterval(() => {
       // Only poll if there are active runs
@@ -293,7 +293,7 @@ export default function FakeTraderPage() {
       if (hasActiveRuns) {
         fetchRuns();
       }
-    }, 5000);
+    }, 60000); // 60 seconds = 1 minute
 
     return () => clearInterval(interval);
   }, [runs]);
