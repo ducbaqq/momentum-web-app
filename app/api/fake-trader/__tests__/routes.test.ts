@@ -1,15 +1,30 @@
 import { NextRequest } from 'next/server';
 
 // Mock the database pool
-jest.mock('@/lib/db', () => ({
-  pool: {
-    query: jest.fn(),
-    connect: jest.fn(),
-  },
-}));
+jest.mock('@/lib/db', () => {
+  const mockQuery = jest.fn();
+  const mockConnect = jest.fn();
+  
+  return {
+    pool: {
+      query: mockQuery,
+      connect: mockConnect,
+    },
+    tradingPool: {
+      query: mockQuery,
+      connect: mockConnect,
+    },
+    dataPool: {
+      query: mockQuery,
+      connect: mockConnect,
+    },
+  };
+});
 
 // Mock database connection
-const mockPool = require('@/lib/db').pool;
+const mockDb = require('@/lib/db');
+const mockPool = mockDb.tradingPool;
+const mockDataPool = mockDb.dataPool;
 
 describe('Fake Trader API Routes', () => {
   beforeEach(() => {

@@ -10,10 +10,19 @@ jest.mock('@/lib/db', () => {
       query: mockQuery,
       connect: mockConnect,
     },
+    tradingPool: {
+      query: mockQuery,
+      connect: mockConnect,
+    },
+    dataPool: {
+      query: mockQuery,
+      connect: mockConnect,
+    },
   };
 });
 
-const mockPool = require('@/lib/db').pool;
+const mockDb = require('@/lib/db');
+const mockPool = mockDb.tradingPool;
 
 describe('Fake Trader API Integration Tests', () => {
   beforeEach(() => {

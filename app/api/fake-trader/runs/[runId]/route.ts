@@ -50,7 +50,7 @@ export async function GET(
       ORDER BY ts DESC
       LIMIT 1
     `;
-    const snapshotResult = await pool.query(snapshotQuery, [runId]);
+    const snapshotResult = await tradingPool.query(snapshotQuery, [runId]);
 
     // Get open positions for unrealized PnL calculation
     const openPositionsQuery = `
@@ -58,7 +58,7 @@ export async function GET(
       FROM ft_positions_v2
       WHERE run_id = $1 AND status IN ('NEW', 'OPEN')
     `;
-    const openPositionsResult = await pool.query(openPositionsQuery, [runId]);
+    const openPositionsResult = await tradingPool.query(openPositionsQuery, [runId]);
 
     // Get latest prices for open positions
     const symbols = openPositionsResult.rows.map((p: any) => p.symbol);
@@ -71,7 +71,7 @@ export async function GET(
         WHERE symbol = ANY($1)
         ORDER BY symbol, ts DESC
       `;
-      const priceResult = await pool.query(priceQuery, [symbols]);
+      const priceResult = await dataPool.query(priceQuery, [symbols]);
       priceMap = Object.fromEntries(
         priceResult.rows.map((r: any) => [r.symbol, Number(r.price)])
       );
@@ -99,7 +99,7 @@ export async function GET(
       FROM ft_positions_v2
       WHERE run_id = $1 AND status = 'CLOSED'
     `;
-    const realizedPnlResult = await pool.query(realizedPnlQuery, [runId]);
+    const realizedPnlResult = await tradingPool.query(realizedPnlQuery, [runId]);
     const realizedPnl = Number(realizedPnlResult.rows[0].total_realized_pnl);
     const totalFees = Number(realizedPnlResult.rows[0].total_fees);
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { tradingPool } from '@/lib/db';
+import { tradingPool, dataPool } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +46,7 @@ export async function GET(
         WHERE symbol = ANY($1)
         ORDER BY symbol, ts DESC
       `;
-      const priceResult = await pool.query(priceQuery, [symbols]);
+      const priceResult = await dataPool.query(priceQuery, [symbols]);
       priceMap = Object.fromEntries(
         priceResult.rows.map((r: any) => [r.symbol, Number(r.price)])
       );
