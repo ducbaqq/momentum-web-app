@@ -69,9 +69,76 @@ function processCandlesResult(result: any, symbols: string[]): Record<string, Ca
 // - dataPool: For reading OHLCV/features from momentum_collector (DATABASE_URL)
 // - tradingPool: For reading/writing fake trader data (TRADING_DB_URL - separate DB for dev/staging)
 
+/**
+ * Extract database name from connection string
+ * e.g., "postgresql://user:pass@host:port/dbname" -> "dbname"
+ */
+function extractDbName(connectionString: string): string {
+  const match = connectionString.match(/\/([^/?]+)(\?|$)/);
+  return match ? match[1] : '';
+}
+
+/**
+ * Replace database name in connection string
+ * e.g., "postgresql://user:pass@host:port/dbname" -> "postgresql://user:pass@host:port/newdbname"
+ */
+function replaceDbName(connectionString: string, newDbName: string): string {
+  return connectionString.replace(/\/([^/?]+)(\?|$)/, `/${newDbName}$2`);
+}
+
+/**
+ * Get base connection string (everything before the database name)
+ * e.g., "postgresql://user:pass@host:port/dbname" -> "postgresql://user:pass@host:port"
+ */
+function getBaseConnectionString(connectionString: string): string {
+  const match = connectionString.match(/(.+)\/[^/?]+/);
+  return match ? match[1] : connectionString;
+}
+
+/**
+ * Construct database URLs from base connection string
+ * Supports:
+ * 1. Full DATABASE_URL (backward compatible)
+ * 2. DB_BASE_URL + DB_NAME (for trading DB) + momentum_collector (for data)
+ */
+function getDatabaseUrls(): { dataUrl: string; tradingUrl: string } {
+  // Option 1: Use DB_BASE_URL if provided (new pattern)
+  if (process.env.DB_BASE_URL) {
+    const baseUrl = process.env.DB_BASE_URL;
+    const tradingDbName = process.env.TRADING_DB_NAME || process.env.NODE_ENV || 'dev';
+    
+    const dataUrl = `${baseUrl}/momentum_collector`;
+    const tradingUrl = `${baseUrl}/${tradingDbName}`;
+    
+    return { dataUrl, tradingUrl };
+  }
+  
+  // Option 2: Use full DATABASE_URL and TRADING_DB_URL (existing pattern)
+  if (process.env.DATABASE_URL) {
+    const dataUrl = process.env.DATABASE_URL;
+    
+    // If TRADING_DB_URL is explicitly set, use it
+    if (process.env.TRADING_DB_URL) {
+      return { dataUrl, tradingUrl: process.env.TRADING_DB_URL };
+    }
+    
+    // Otherwise, derive trading DB URL from DATABASE_URL by replacing database name
+    const tradingDbName = process.env.TRADING_DB_NAME || process.env.NODE_ENV || 'dev';
+    const tradingUrl = replaceDbName(dataUrl, tradingDbName);
+    
+    return { dataUrl, tradingUrl };
+  }
+  
+  // Option 3: Fallback to defaults
+  return {
+    dataUrl: 'postgresql://localhost/momentum_collector',
+    tradingUrl: 'postgresql://localhost/fake-trader'
+  };
+}
+
 function createPool(connectionString: string | undefined, defaultUrl: string): Pool {
   const url = connectionString || defaultUrl;
-  const isDigitalOcean = url.includes('ondigitalocean') || url.includes('ssl');
+  const isDigitalOcean = url.includes('ondigitalocean') || url.includes('ssl') || url.includes('sslmode=require');
   
   return new Pool({
     connectionString: url,
@@ -82,25 +149,25 @@ function createPool(connectionString: string | undefined, defaultUrl: string): P
   });
 }
 
-// Data pool: Always uses DATABASE_URL for reading OHLCV/features from momentum_collector
-export const dataPool = createPool(process.env.DATABASE_URL, 'postgresql://localhost/momentum_collector');
+// Get database URLs based on environment configuration
+const { dataUrl, tradingUrl } = getDatabaseUrls();
 
-// Trading pool: Uses TRADING_DB_URL (separate DB for fake trader - different for dev/staging)
-// Falls back to DATABASE_URL if TRADING_DB_URL not set (for backward compatibility)
-const tradingDbUrl = process.env.TRADING_DB_URL || process.env.DATABASE_URL;
-export const tradingPool = createPool(tradingDbUrl, 'postgresql://localhost/fake-trader');
+// Data pool: Always uses momentum_collector database
+export const dataPool = createPool(dataUrl, 'postgresql://localhost/momentum_collector');
+
+// Trading pool: Uses separate database (dev/staging) based on TRADING_DB_NAME or NODE_ENV
+export const tradingPool = createPool(tradingUrl, 'postgresql://localhost/fake-trader');
 
 // Legacy export for backward compatibility (uses trading pool)
 export const pool = tradingPool;
 
 // Log which databases are being used
-if (process.env.TRADING_DB_URL) {
-  console.log('📊 Dual database mode enabled:');
-  console.log(`  📖 Reading OHLCV/features from: ${process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || 'DATABASE_URL'} (momentum_collector)`);
-  console.log(`  ✍️  Writing fake trader data to: ${process.env.TRADING_DB_URL?.split('@')[1]?.split('/')[0] || 'TRADING_DB_URL'} (fake-trader DB)`);
-} else {
-  console.log('📊 Single database mode: Using DATABASE_URL for all operations');
-  console.log('⚠️  Consider setting TRADING_DB_URL for separate fake trader database');
+console.log('📊 Database configuration:');
+console.log(`  📖 Data pool (OHLCV/features): ${dataUrl.split('@')[1]?.split('/')[0] || 'local'} → momentum_collector`);
+console.log(`  ✍️  Trading pool (fake trader): ${tradingUrl.split('@')[1]?.split('/')[0] || 'local'} → ${extractDbName(tradingUrl)}`);
+
+if (process.env.DB_BASE_URL || process.env.TRADING_DB_NAME) {
+  console.log('  ✅ Using dynamic database URL construction');
 }
 
 // Test connection
