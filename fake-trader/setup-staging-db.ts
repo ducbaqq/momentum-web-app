@@ -24,7 +24,9 @@ if (!process.env.STAGING_DATABASE_URL) {
 
 const stagingPool = new Pool({
   connectionString: process.env.STAGING_DATABASE_URL,
-  ssl: process.env.STAGING_DATABASE_URL?.includes('ondigitalocean') ? { rejectUnauthorized: false } : false,
+  ssl: process.env.STAGING_DATABASE_URL?.includes('ondigitalocean') || process.env.STAGING_DATABASE_URL?.includes('ssl') 
+    ? { rejectUnauthorized: false } 
+    : false,
 });
 
 async function setupStagingDatabase() {
