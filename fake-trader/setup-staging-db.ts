@@ -34,30 +34,35 @@ function replaceDbName(connectionString: string, newDbName: string): string {
 
 /**
  * Get trading database URL from environment variables
+ * PRIMARY: DB_BASE_URL + TRADING_DB_NAME
+ * Falls back to other patterns for backward compatibility
  */
 function getTradingDbUrl(): string {
-  // Option 1: Use DB_BASE_URL + TRADING_DB_NAME
+  // PRIMARY: Use DB_BASE_URL + TRADING_DB_NAME (recommended)
   if (process.env.DB_BASE_URL) {
     const tradingDbName = process.env.TRADING_DB_NAME || process.env.NODE_ENV || 'dev';
     return `${process.env.DB_BASE_URL}/${tradingDbName}`;
   }
   
-  // Option 2: Use explicit TRADING_DB_URL
+  // FALLBACK 1: Use explicit TRADING_DB_URL
   if (process.env.TRADING_DB_URL) {
     return process.env.TRADING_DB_URL;
   }
   
-  // Option 3: Derive from DATABASE_URL
+  // FALLBACK 2: Derive from DATABASE_URL
   if (process.env.DATABASE_URL) {
     const tradingDbName = process.env.TRADING_DB_NAME || process.env.NODE_ENV || 'dev';
     return replaceDbName(process.env.DATABASE_URL, tradingDbName);
   }
   
   console.error('❌ Error: No database configuration found');
-  console.error('Please set one of:');
-  console.error('  - DB_BASE_URL + TRADING_DB_NAME (recommended)');
+  console.error('\n📝 Please set one of the following:');
+  console.error('\n✅ PRIMARY (recommended):');
+  console.error('  DB_BASE_URL="postgresql://user:pass@host:port"');
+  console.error('  TRADING_DB_NAME="dev"  # or "staging", "prod", etc.');
+  console.error('\n📌 FALLBACK options:');
   console.error('  - TRADING_DB_URL (full connection string)');
-  console.error('  - DATABASE_URL + TRADING_DB_NAME');
+  console.error('  - DATABASE_URL + TRADING_DB_NAME (derives from DATABASE_URL)');
   process.exit(1);
 }
 

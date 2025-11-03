@@ -97,12 +97,11 @@ function getBaseConnectionString(connectionString: string): string {
 
 /**
  * Construct database URLs from base connection string
- * Supports:
- * 1. Full DATABASE_URL (backward compatible)
- * 2. DB_BASE_URL + DB_NAME (for trading DB) + momentum_collector (for data)
+ * Primary method: DB_BASE_URL + TRADING_DB_NAME
+ * Falls back to other patterns for backward compatibility
  */
 function getDatabaseUrls(): { dataUrl: string; tradingUrl: string } {
-  // Option 1: Use DB_BASE_URL if provided (new pattern)
+  // PRIMARY: Use DB_BASE_URL + TRADING_DB_NAME (recommended)
   if (process.env.DB_BASE_URL) {
     const baseUrl = process.env.DB_BASE_URL;
     const tradingDbName = process.env.TRADING_DB_NAME || process.env.NODE_ENV || 'dev';
@@ -113,7 +112,7 @@ function getDatabaseUrls(): { dataUrl: string; tradingUrl: string } {
     return { dataUrl, tradingUrl };
   }
   
-  // Option 2: Use full DATABASE_URL and TRADING_DB_URL (existing pattern)
+  // FALLBACK 1: Use DATABASE_URL and derive trading DB by replacing database name
   if (process.env.DATABASE_URL) {
     const dataUrl = process.env.DATABASE_URL;
     
@@ -129,7 +128,7 @@ function getDatabaseUrls(): { dataUrl: string; tradingUrl: string } {
     return { dataUrl, tradingUrl };
   }
   
-  // Option 3: Fallback to defaults
+  // FALLBACK 2: Default to localhost
   return {
     dataUrl: 'postgresql://localhost/momentum_collector',
     tradingUrl: 'postgresql://localhost/fake-trader'
@@ -166,8 +165,9 @@ console.log('📊 Database configuration:');
 console.log(`  📖 Data pool (OHLCV/features): ${dataUrl.split('@')[1]?.split('/')[0] || 'local'} → momentum_collector`);
 console.log(`  ✍️  Trading pool (fake trader): ${tradingUrl.split('@')[1]?.split('/')[0] || 'local'} → ${extractDbName(tradingUrl)}`);
 
-if (process.env.DB_BASE_URL || process.env.TRADING_DB_NAME) {
-  console.log('  ✅ Using dynamic database URL construction');
+if (process.env.DB_BASE_URL) {
+  console.log(`  ✅ Using DB_BASE_URL pattern (recommended)`);
+  console.log(`  📝 TRADING_DB_NAME: ${process.env.TRADING_DB_NAME || process.env.NODE_ENV || 'dev'}`);
 }
 
 // Test connection
