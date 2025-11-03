@@ -443,7 +443,7 @@ export async function getLastProcessedCandle(runId: string, symbol: string): Pro
     WHERE run_id = $1
   `;
 
-  const result = await pool.query(query, [runId]);
+  const result = await tradingPool.query(query, [runId]);
   return result.rows[0]?.last_processed_candle || null;
 }
 
@@ -535,7 +535,7 @@ export async function getCurrentPositions(runId: string): Promise<FakePosition[]
     ORDER BY opened_at DESC
   `;
   
-  const result = await pool.query(query, [runId]);
+  const result = await tradingPool.query(query, [runId]);
   return result.rows.map(row => ({
     ...row,
     size: Number(row.size),
@@ -659,7 +659,7 @@ export async function getTrades(runId: string): Promise<FakeTrade[]> {
     ORDER BY entry_ts DESC
   `;
 
-  const result = await pool.query(query, [runId]);
+  const result = await tradingPool.query(query, [runId]);
   return result.rows.map(row => ({
     ...row,
     qty: Number(row.qty),
