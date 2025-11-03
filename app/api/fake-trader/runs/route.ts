@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { pool } from '@/lib/db';
+import { tradingPool } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,7 @@ export async function DELETE(request: Request) {
     const deleteAll = url.searchParams.get('all') === 'true';
     
     // Start a transaction to delete all related data
-    const client = await pool.connect();
+    const client = await tradingPool.connect();
     
     try {
       await client.query('BEGIN');
@@ -162,7 +162,7 @@ export async function GET(req: NextRequest) {
       LIMIT 50
     `;
 
-    const runsResult = await pool.query(runsQuery);
+    const runsResult = await tradingPool.query(runsQuery);
 
     // For each run, calculate available funds (current_capital - margin invested in open positions)
     const runsWithAvailableFunds = await Promise.all(
@@ -176,7 +176,7 @@ export async function GET(req: NextRequest) {
           WHERE run_id = $1 AND status = 'open'
         `;
 
-        const marginResult = await pool.query(marginQuery, [runId]);
+        const marginResult = await tradingPool.query(marginQuery, [runId]);
         const marginInvested = Number(marginResult.rows[0].margin_invested);
 
         const currentCapital = Number(row.current_capital);

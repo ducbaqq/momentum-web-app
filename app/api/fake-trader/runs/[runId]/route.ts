@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { pool } from '@/lib/db';
+import { tradingPool, dataPool } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +33,7 @@ export async function GET(
       WHERE run_id = $1
     `;
     
-    const result = await pool.query(query, [runId]);
+    const result = await tradingPool.query(query, [runId]);
     
     if (result.rows.length === 0) {
       return NextResponse.json(
@@ -82,7 +82,7 @@ export async function PATCH(
         RETURNING *
       `;
       
-      const result = await pool.query(updateQuery, [runId]);
+      const result = await tradingPool.query(updateQuery, [runId]);
       
       return NextResponse.json({ 
         success: true, 
@@ -106,7 +106,7 @@ export async function PATCH(
       RETURNING *
     `;
     
-    const result = await pool.query(query, [runId, status]);
+    const result = await tradingPool.query(query, [runId, status]);
     
     if (result.rows.length === 0) {
       return NextResponse.json(
@@ -142,7 +142,7 @@ async function handleForceExit(runId: string) {
     WHERE run_id = $1 AND status = 'open'
   `;
   
-  const positions = await pool.query(positionsQuery, [runId]);
+  const positions = await tradingPool.query(positionsQuery, [runId]);
   
   if (positions.rows.length === 0) {
     return; // No open positions to close
@@ -159,7 +159,7 @@ async function handleForceExit(runId: string) {
     ORDER BY symbol, ts DESC
   `;
   
-  const candles = await pool.query(candlesQuery, [symbols]);
+  const candles = await dataPool.query(candlesQuery, [symbols]);
   const priceMap = Object.fromEntries(
     candles.rows.map(row => [row.symbol, parseFloat(row.close)])
   );
@@ -171,7 +171,7 @@ async function handleForceExit(runId: string) {
     const fees = position.size * currentPrice * 0.0004; // 0.04% fees
 
     // Create exit trade record
-    await pool.query(`
+    await tradingPool.query(`
       INSERT INTO ft_trades (run_id, symbol, side, entry_ts, exit_ts, qty, entry_px, exit_px, realized_pnl, fees, reason, leverage, status)
       VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, 'force_exit', $10, 'closed')
     `, [
@@ -188,7 +188,7 @@ async function handleForceExit(runId: string) {
     ]);
 
     // Close the position
-    await pool.query(`
+    await tradingPool.query(`
       UPDATE ft_positions
       SET status = 'closed', current_price = $2, unrealized_pnl = $3
       WHERE position_id = $1
@@ -196,7 +196,7 @@ async function handleForceExit(runId: string) {
 
     // Update run capital - return margin + realized P&L - fees
     const capitalAdjustment = Number(position.cost_basis) + realizedPnl - fees;
-    await pool.query(`
+    await tradingPool.query(`
       UPDATE ft_runs
       SET current_capital = current_capital + $2
       WHERE run_id = $1

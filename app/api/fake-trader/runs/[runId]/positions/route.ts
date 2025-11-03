@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { pool } from '@/lib/db';
+import { tradingPool } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +33,7 @@ export async function GET(
       ORDER BY opened_at DESC
     `;
     
-    const result = await pool.query(query, [runId]);
+    const result = await tradingPool.query(query, [runId]);
     
     // Convert numeric fields to proper numbers
     const positions = result.rows.map(row => ({

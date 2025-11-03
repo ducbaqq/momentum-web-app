@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { pool } from '@/lib/db';
+import { tradingPool } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,12 +48,12 @@ export async function POST(req: NextRequest) {
       seed || Math.floor(Math.random() * 1000000)
     ];
 
-    const result = await pool.query(query, values);
+    const result = await tradingPool.query(query, values);
     const run = result.rows[0];
 
     // Initialize results for each symbol
     const resultQueries = symbols.map((symbol: string) => {
-      return pool.query(`
+      return tradingPool.query(`
         INSERT INTO ft_results (run_id, symbol)
         VALUES ($1, $2)
       `, [run.run_id, symbol]);
