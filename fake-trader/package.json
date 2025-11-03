@@ -11,7 +11,8 @@
     "test": "tsx src/tests/index.ts",
     "setup-db": "tsx setup-staging-db.ts",
     "setup-dev": "tsx setup-staging-db.ts dev",
-    "setup-staging": "tsx setup-staging-db.ts staging"
+    "setup-staging": "tsx setup-staging-db.ts staging",
+    "migrate": "tsx ensure-canonical-tables.ts"
   },
   "dependencies": {
     "pg": "^8.11.3",

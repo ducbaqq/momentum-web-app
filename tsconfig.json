@@ -40,6 +40,7 @@
     "node_modules",
     "backtest-worker/**",
     "fake-trader/**",
-    "real-trader/**"
+    "real-trader/**",
+    "momentum-collector/**"
   ]
 }
