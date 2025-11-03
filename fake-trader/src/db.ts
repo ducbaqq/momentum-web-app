@@ -67,7 +67,7 @@ function processCandlesResult(result: any, symbols: string[]): Record<string, Ca
 
 // Initialize database connections
 // - dataPool: For reading OHLCV/features from momentum_collector (DATABASE_URL)
-// - tradingPool: For reading/writing fake trader data (STAGING_DATABASE_URL if set, otherwise DATABASE_URL)
+// - tradingPool: For reading/writing fake trader data (TRADING_DB_URL - separate DB for dev/staging)
 
 function createPool(connectionString: string | undefined, defaultUrl: string): Pool {
   const url = connectionString || defaultUrl;
@@ -85,20 +85,22 @@ function createPool(connectionString: string | undefined, defaultUrl: string): P
 // Data pool: Always uses DATABASE_URL for reading OHLCV/features from momentum_collector
 export const dataPool = createPool(process.env.DATABASE_URL, 'postgresql://localhost/momentum_collector');
 
-// Trading pool: Uses STAGING_DATABASE_URL if set (for staging), otherwise DATABASE_URL (for dev)
-const tradingDbUrl = process.env.STAGING_DATABASE_URL || process.env.DATABASE_URL;
-export const tradingPool = createPool(tradingDbUrl, 'postgresql://localhost/momentum_collector');
+// Trading pool: Uses TRADING_DB_URL (separate DB for fake trader - different for dev/staging)
+// Falls back to DATABASE_URL if TRADING_DB_URL not set (for backward compatibility)
+const tradingDbUrl = process.env.TRADING_DB_URL || process.env.DATABASE_URL;
+export const tradingPool = createPool(tradingDbUrl, 'postgresql://localhost/fake-trader');
 
 // Legacy export for backward compatibility (uses trading pool)
 export const pool = tradingPool;
 
 // Log which databases are being used
-if (process.env.STAGING_DATABASE_URL) {
+if (process.env.TRADING_DB_URL) {
   console.log('📊 Dual database mode enabled:');
-  console.log(`  📖 Reading OHLCV/features from: ${process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || 'DATABASE_URL'}`);
-  console.log(`  ✍️  Writing fake trader data to: ${process.env.STAGING_DATABASE_URL?.split('@')[1]?.split('/')[0] || 'STAGING_DATABASE_URL'}`);
+  console.log(`  📖 Reading OHLCV/features from: ${process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || 'DATABASE_URL'} (momentum_collector)`);
+  console.log(`  ✍️  Writing fake trader data to: ${process.env.TRADING_DB_URL?.split('@')[1]?.split('/')[0] || 'TRADING_DB_URL'} (fake-trader DB)`);
 } else {
   console.log('📊 Single database mode: Using DATABASE_URL for all operations');
+  console.log('⚠️  Consider setting TRADING_DB_URL for separate fake trader database');
 }
 
 // Test connection
