@@ -42,7 +42,7 @@ export async function GET(
       );
     }
 
-    // Get latest account snapshot
+    // Get latest account snapshot (canonical model required)
     const snapshotQuery = `
       SELECT equity, cash, margin_used, exposure_gross, exposure_net, open_positions_count, ts
       FROM ft_account_snapshots
@@ -51,6 +51,12 @@ export async function GET(
       LIMIT 1
     `;
     const snapshotResult = await tradingPool.query(snapshotQuery, [runId]);
+    
+    // If no snapshot exists yet, use starting_capital as initial values
+    const snapshot = snapshotResult.rows[0];
+    const equity = snapshot ? Number(snapshot.equity) : Number(result.rows[0].starting_capital);
+    const cash = snapshot ? Number(snapshot.cash) : Number(result.rows[0].starting_capital);
+    const marginUsed = snapshot ? Number(snapshot.margin_used) : 0;
 
     // Get open positions for unrealized PnL calculation
     const openPositionsQuery = `
@@ -103,11 +109,11 @@ export async function GET(
     const realizedPnl = Number(realizedPnlResult.rows[0].total_realized_pnl);
     const totalFees = Number(realizedPnlResult.rows[0].total_fees);
 
-    // Use account snapshot if available
+    // Use account snapshot (canonical model required)
     const snapshot = snapshotResult.rows[0];
-    const equity = snapshot ? Number(snapshot.equity) : Number(result.rows[0].current_capital);
-    const cash = snapshot ? Number(snapshot.cash) : (Number(result.rows[0].current_capital) - Number(snapshot?.margin_used || 0));
-    const marginUsed = snapshot ? Number(snapshot.margin_used) : 0;
+    const equity = Number(snapshot.equity);
+    const cash = Number(snapshot.cash);
+    const marginUsed = Number(snapshot.margin_used);
 
     const run = {
       ...result.rows[0],

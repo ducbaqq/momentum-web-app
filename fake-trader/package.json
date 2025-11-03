@@ -12,7 +12,8 @@
     "setup-db": "tsx setup-staging-db.ts",
     "setup-dev": "tsx setup-staging-db.ts dev",
     "setup-staging": "tsx setup-staging-db.ts staging",
-    "migrate": "tsx ensure-canonical-tables.ts"
+    "migrate": "tsx ensure-canonical-tables.ts",
+    "clear-dev": "tsx clear-dev-data.ts"
   },
   "dependencies": {
     "pg": "^8.11.3",

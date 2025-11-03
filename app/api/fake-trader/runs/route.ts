@@ -205,25 +205,22 @@ export async function GET(req: NextRequest) {
       runsResult.rows.map(async (row) => {
         const runId = row.run_id;
 
-        // Get latest account snapshot
-        // Try to get latest account snapshot (may not exist if canonical tables not migrated)
-        let snapshotResult;
-        try {
-          const snapshotQuery = `
-            SELECT equity, cash, margin_used, exposure_gross, exposure_net, open_positions_count
-            FROM ft_account_snapshots
-            WHERE run_id = $1
-            ORDER BY ts DESC
-            LIMIT 1
-          `;
-          snapshotResult = await tradingPool.query(snapshotQuery, [runId]);
-        } catch (error: any) {
-          if (error.message.includes('does not exist')) {
-            throw new Error('Canonical tables not found. Please run migration: POST /api/migrate');
-          }
-          throw error;
-        }
-
+        // Get latest account snapshot (canonical model required)
+        const snapshotQuery = `
+          SELECT equity, cash, margin_used, exposure_gross, exposure_net, open_positions_count
+          FROM ft_account_snapshots
+          WHERE run_id = $1
+          ORDER BY ts DESC
+          LIMIT 1
+        `;
+        const snapshotResult = await tradingPool.query(snapshotQuery, [runId]);
+        
+        // If no snapshot exists yet, use starting_capital as initial values
+        const snapshot = snapshotResult.rows[0];
+        const equity = snapshot ? Number(snapshot.equity) : Number(row.starting_capital);
+        const cash = snapshot ? Number(snapshot.cash) : Number(row.starting_capital);
+        const marginUsed = snapshot ? Number(snapshot.margin_used) : 0;
+        const availableFunds = cash;
         // Get open positions for unrealized PnL calculation
         const openPositionsQuery = `
           SELECT position_id, symbol, side, entry_price_vwap, quantity_open, cost_basis
@@ -272,13 +269,6 @@ export async function GET(req: NextRequest) {
         `;
         const realizedPnlResult = await tradingPool.query(realizedPnlQuery, [runId]);
         const realizedPnl = Number(realizedPnlResult.rows[0].total_realized_pnl);
-
-        // Use account snapshot if available, otherwise fall back to current_capital
-        const snapshot = snapshotResult.rows[0];
-        const equity = snapshot ? Number(snapshot.equity) : Number(row.current_capital);
-        const cash = snapshot ? Number(snapshot.cash) : (Number(row.current_capital) - Number(snapshot?.margin_used || 0));
-        const marginUsed = snapshot ? Number(snapshot.margin_used) : 0;
-        const availableFunds = cash;
 
         return {
           ...row,
