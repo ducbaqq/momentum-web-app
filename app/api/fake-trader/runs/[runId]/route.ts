@@ -109,12 +109,6 @@ export async function GET(
     const realizedPnl = Number(realizedPnlResult.rows[0].total_realized_pnl);
     const totalFees = Number(realizedPnlResult.rows[0].total_fees);
 
-    // Use account snapshot (canonical model required)
-    const snapshot = snapshotResult.rows[0];
-    const equity = Number(snapshot.equity);
-    const cash = Number(snapshot.cash);
-    const marginUsed = Number(snapshot.margin_used);
-
     const run = {
       ...result.rows[0],
       symbols: Array.isArray(result.rows[0].symbols) ? result.rows[0].symbols : [],
