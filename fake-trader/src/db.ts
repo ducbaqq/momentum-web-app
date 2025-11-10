@@ -207,16 +207,18 @@ export async function testConnection(): Promise<void> {
 }
 
 // Get active trading runs (including winding down runs)
+// ONLY returns version 2.0 runs (canonical model)
 export async function getActiveRuns(): Promise<FakeTradeRun[]> {
   const query = `
     SELECT * FROM ft_runs 
     WHERE status IN ('active', 'winding_down')
+    AND (strategy_version = '2.0' OR strategy_version IS NULL)
     ORDER BY created_at DESC
   `;
   
-  console.log('[DB] Querying for active runs...');
+  console.log('[DB] Querying for active runs (V2 only)...');
   const result = await tradingPool.query(query);
-  console.log(`[DB] Found ${result.rows.length} runs with status 'active' or 'winding_down'`);
+  console.log(`[DB] Found ${result.rows.length} V2 runs with status 'active' or 'winding_down'`);
   
   // Log all runs and their statuses for debugging
   if (result.rows.length === 0) {

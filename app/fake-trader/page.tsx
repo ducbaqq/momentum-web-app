@@ -166,7 +166,7 @@ export default function FakeTraderPage() {
         symbols: symbolManager.selectedSymbols,
         timeframe: formData.timeframe,
         strategy_name: 'momentum_breakout_v2',
-        strategy_version: '1.0',
+        strategy_version: '2.0',
         starting_capital: formData.startingCapital,
         max_concurrent_positions: formData.maxConcurrentPositions,
         params: strategyParams,
