@@ -799,7 +799,7 @@ export async function runAllTests(): Promise<void> {
         AND name LIKE 'TEST: %'
     `);
     
-    if (cleanupResult.rowCount > 0) {
+    if (cleanupResult.rowCount && cleanupResult.rowCount > 0) {
       console.log(`🧹 Cleaned up ${cleanupResult.rowCount} test run(s)`);
     }
   } catch (error: any) {
