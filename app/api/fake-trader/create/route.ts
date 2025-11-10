@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
       symbols,
       timeframe = '15m',
       strategy_name,
-      strategy_version = '1.0',
+      strategy_version = '2.0',
       starting_capital = 10000,
       max_concurrent_positions = 3,
       params = {},

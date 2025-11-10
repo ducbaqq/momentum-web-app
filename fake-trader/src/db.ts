@@ -211,13 +211,12 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
   const query = `
     SELECT * FROM ft_runs 
     WHERE status IN ('active', 'winding_down')
-    AND (strategy_version IS NULL OR strategy_version != '2.0')
     ORDER BY created_at DESC
   `;
   
-  console.log('[DB] Querying for active runs (version 1)...');
+  console.log('[DB] Querying for active runs...');
   const result = await tradingPool.query(query);
-  console.log(`[DB] Found ${result.rows.length} runs with status 'active' or 'winding_down' (version 1)`);
+  console.log(`[DB] Found ${result.rows.length} runs with status 'active' or 'winding_down'`);
   
   // Log all runs and their statuses for debugging
   if (result.rows.length === 0) {
@@ -225,31 +224,9 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
     const allRunsQuery = await tradingPool.query('SELECT run_id, name, status, strategy_version FROM ft_runs ORDER BY created_at DESC LIMIT 5');
     console.log(`[DB] Total runs in database: ${allRunsQuery.rows.length}`);
     if (allRunsQuery.rows.length > 0) {
-      console.log('[DB] Sample runs:', allRunsQuery.rows.map(r => `${r.run_id.substring(0, 8)}... - ${r.name || 'unnamed'} - status: ${r.status} - version: ${r.strategy_version || '1.0'}`));
+      console.log('[DB] Sample runs:', allRunsQuery.rows.map(r => `${r.run_id.substring(0, 8)}... - ${r.name || 'unnamed'} - status: ${r.status} - version: ${r.strategy_version || 'default'}`));
     }
   }
-  
-  return result.rows.map(row => ({
-    ...row,
-    starting_capital: Number(row.starting_capital),
-    current_capital: Number(row.current_capital),
-    max_concurrent_positions: Number(row.max_concurrent_positions),
-    seed: row.seed ? Number(row.seed) : undefined,
-    params: typeof row.params === 'string' ? JSON.parse(row.params) : (row.params || {}),
-  }));
-}
-
-export async function getActiveRunsV2(): Promise<FakeTradeRun[]> {
-  const query = `
-    SELECT * FROM ft_runs 
-    WHERE status IN ('active', 'winding_down')
-    AND strategy_version = '2.0'
-    ORDER BY created_at DESC
-  `;
-  
-  console.log('[DB] Querying for active runs (version 2)...');
-  const result = await tradingPool.query(query);
-  console.log(`[DB] Found ${result.rows.length} runs with status 'active' or 'winding_down' (version 2)`);
   
   return result.rows.map(row => ({
     ...row,
