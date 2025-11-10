@@ -95,9 +95,40 @@ export function momentumBreakoutV2Strategy(
       console.log(`[${state.symbol}] 🚀 ENTRY SIGNAL: roc_${timeframe}=${(rocValue * 100).toFixed(2)}% (>=${minRocThreshold}%), volMult=${volMult.toFixed(2)}x (>=${minVolMult}), spread=${spreadBps.toFixed(1)}bps (<=${maxSpreadBps})`);
       
       // Calculate position size based on risk percentage
+      // Formula: We risk riskPct% of capital, and use leverage to amplify
+      // Position value = (capital * riskPct/100) * leverage
+      // Position size = position value / price
       const riskAmount = state.currentCapital * (riskPct / 100);
       const positionNotional = riskAmount * leverage;
-      const positionSize = positionNotional / candle.close;
+      let positionSize = positionNotional / candle.close;
+      
+      // CRITICAL SAFETY CHECK: Position size must never exceed what we can afford
+      // Maximum position value = currentCapital * leverage (we can't borrow more than we have)
+      const maxPositionValue = state.currentCapital * leverage;
+      const calculatedPositionValue = positionSize * candle.close;
+      
+      if (calculatedPositionValue > maxPositionValue) {
+        console.log(`[${state.symbol}] ⚠️  SAFETY: Position size ${positionSize.toFixed(4)} ETH ($${calculatedPositionValue.toFixed(2)}) exceeds max ($${maxPositionValue.toFixed(2)}), capping`);
+        positionSize = maxPositionValue / candle.close;
+      }
+      
+      // Additional safety: Ensure margin + fees don't exceed capital
+      const marginRequired = (positionSize * candle.close) / leverage;
+      const fees = positionSize * candle.close * 0.0004;
+      
+      if (marginRequired + fees > state.currentCapital) {
+        // Recalculate: Use available capital (minus fees) for margin, then apply leverage
+        const availableForMargin = Math.max(0, state.currentCapital - fees);
+        const maxPositionValueFromMargin = availableForMargin * leverage;
+        positionSize = maxPositionValueFromMargin / candle.close;
+        console.log(`[${state.symbol}] ⚠️  SAFETY: Position size adjusted to fit capital: ${positionSize.toFixed(4)} ETH (margin: $${availableForMargin.toFixed(2)}, fees: $${fees.toFixed(2)})`);
+      }
+      
+      // Final sanity check: Position size must be positive and reasonable
+      if (positionSize <= 0 || !isFinite(positionSize)) {
+        console.log(`[${state.symbol}] ❌ Invalid position size calculated: ${positionSize}, skipping signal`);
+        return signals; // Return empty signals array
+      }
       
       signals.push({
         symbol: state.symbol,
