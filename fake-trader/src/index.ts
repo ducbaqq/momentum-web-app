@@ -129,7 +129,7 @@ class FakeTrader {
   }
 
   private async executeTradingCycle() {
-    const activeRuns = await getActiveRunsV2();
+    const activeRuns = await getActiveRuns();
     
     if (activeRuns.length === 0) {
       return;
