@@ -10,7 +10,7 @@ export async function GET(
   try {
     const { runId } = params;
 
-    // Get open positions from ft_positions_v2
+    // Get open positions from ft_positions_v2 (canonical model only)
     const query = `
       SELECT 
         position_id,

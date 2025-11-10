@@ -10,7 +10,7 @@ export async function GET(
   try {
     const { runId } = params;
 
-    // Query ft_positions_v2 (canonical model) for closed positions
+    // Query ft_positions_v2 (canonical model only) for closed positions
     const query = `
       SELECT 
         position_id,
@@ -38,7 +38,7 @@ export async function GET(
     
     // Convert numeric fields to proper numbers
     const trades = result.rows.map(row => ({
-      trade_id: row.position_id, // Use position_id as trade_id for compatibility
+      trade_id: row.position_id,
       ...row,
       qty: Number(row.qty),
       entry_px: Number(row.entry_px),
