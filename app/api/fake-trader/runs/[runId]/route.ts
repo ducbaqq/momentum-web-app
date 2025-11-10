@@ -212,10 +212,11 @@ export async function PATCH(
 }
 
 async function handleForceExit(runId: string) {
-  // Get all open positions for this run
+  // Get all open positions for this run (canonical model)
   const positionsQuery = `
-    SELECT * FROM ft_positions 
-    WHERE run_id = $1 AND status = 'open'
+    SELECT position_id, symbol, side, entry_price_vwap, quantity_open, cost_basis, leverage_effective
+    FROM ft_positions_v2 
+    WHERE run_id = $1 AND status IN ('NEW', 'OPEN')
   `;
   
   const positions = await tradingPool.query(positionsQuery, [runId]);
@@ -225,7 +226,7 @@ async function handleForceExit(runId: string) {
   }
 
   // Get current market prices for all symbols
-  const symbols = [...new Set(positions.rows.map(p => p.symbol))];
+  const symbols = [...new Set(positions.rows.map((p: any) => p.symbol))];
   const candlesQuery = `
     SELECT DISTINCT ON (symbol) 
       symbol, close
@@ -237,53 +238,133 @@ async function handleForceExit(runId: string) {
   
   const candles = await dataPool.query(candlesQuery, [symbols]);
   const priceMap = Object.fromEntries(
-    candles.rows.map(row => [row.symbol, parseFloat(row.close)])
+    candles.rows.map((row: any) => [row.symbol, parseFloat(row.close)])
   );
 
-  // Close all positions at current market price
+  // Close all positions using canonical model
   for (const position of positions.rows) {
-    const currentPrice = priceMap[position.symbol] || position.current_price;
-    const realizedPnl = calculateRealizedPnL(position, currentPrice);
-    const fees = position.size * currentPrice * 0.0004; // 0.04% fees
-
-    // Create exit trade record
+    const currentPrice = priceMap[position.symbol] || 0;
+    if (!currentPrice) {
+      console.error(`No price found for ${position.symbol}, skipping`);
+      continue;
+    }
+    
+    const entryPrice = Number(position.entry_price_vwap);
+    const qty = Number(position.quantity_open);
+    const side = position.side;
+    
+    // Calculate realized PnL
+    let realizedPnl = 0;
+    if (side === 'LONG') {
+      realizedPnl = (currentPrice - entryPrice) * qty;
+    } else {
+      realizedPnl = (entryPrice - currentPrice) * qty;
+    }
+    
+    const fees = qty * currentPrice * 0.0004; // 0.04% fees
+    
+    // Create EXIT order
+    const exitOrderIdResult = await tradingPool.query(`
+      INSERT INTO ft_orders (run_id, symbol, ts, side, type, qty, price, status, reason_tag, position_id)
+      VALUES ($1, $2, NOW(), $3, 'EXIT', $4, $5, 'NEW', 'force_exit', $6)
+      RETURNING order_id
+    `, [runId, position.symbol, side, qty, currentPrice, position.position_id]);
+    
+    const orderId = exitOrderIdResult.rows[0].order_id;
+    
+    // Create EXIT fill
     await tradingPool.query(`
-      INSERT INTO ft_trades (run_id, symbol, side, entry_ts, exit_ts, qty, entry_px, exit_px, realized_pnl, fees, reason, leverage, status)
-      VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, 'force_exit', $10, 'closed')
-    `, [
-      runId,
-      position.symbol,
-      position.side,
-      position.opened_at,
-      position.size,
-      position.entry_price,
-      currentPrice,
-      realizedPnl,
-      fees,
-      position.leverage
-    ]);
-
-    // Close the position
+      INSERT INTO ft_fills (order_id, run_id, symbol, ts, qty, price, fee, position_id)
+      VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)
+    `, [orderId, runId, position.symbol, qty, currentPrice, fees, position.position_id]);
+    
+    // Update position from fills (recalculate metrics)
+    const fillsResult = await tradingPool.query(`
+      SELECT f.*, o.type as order_type
+      FROM ft_fills f
+      JOIN ft_orders o ON f.order_id = o.order_id
+      WHERE f.position_id = $1
+      ORDER BY f.ts ASC
+    `, [position.position_id]);
+    
+    const fills = fillsResult.rows;
+    const entryFills = fills.filter((f: any) => f.order_type === 'ENTRY');
+    const exitFills = fills.filter((f: any) => f.order_type === 'EXIT');
+    
+    // Calculate VWAP entry price
+    let entryVwap = null;
+    if (entryFills.length > 0) {
+      const totalQty = entryFills.reduce((sum: number, f: any) => sum + Number(f.qty), 0);
+      const totalCost = entryFills.reduce((sum: number, f: any) => sum + Number(f.qty) * Number(f.price), 0);
+      if (totalQty > 0) {
+        entryVwap = totalCost / totalQty;
+      }
+    }
+    
+    // Calculate VWAP exit price
+    let exitVwap = null;
+    if (exitFills.length > 0) {
+      const totalQty = exitFills.reduce((sum: number, f: any) => sum + Number(f.qty), 0);
+      const totalValue = exitFills.reduce((sum: number, f: any) => sum + Number(f.qty) * Number(f.price), 0);
+      if (totalQty > 0) {
+        exitVwap = totalValue / totalQty;
+      }
+    }
+    
+    // Calculate realized PnL from fills
+    let calculatedRealizedPnl = 0;
+    let quantityOpen = 0;
+    let costBasis = 0;
+    let feesTotal = 0;
+    
+    for (const fill of fills) {
+      feesTotal += Number(fill.fee);
+      if (fill.order_type === 'ENTRY') {
+        quantityOpen += Number(fill.qty);
+        costBasis += Number(fill.qty) * Number(fill.price);
+      } else if (fill.order_type === 'EXIT') {
+        quantityOpen -= Number(fill.qty);
+        // Calculate PnL for this exit fill
+        if (side === 'LONG' && entryVwap) {
+          calculatedRealizedPnl += (Number(fill.price) - entryVwap) * Number(fill.qty);
+        } else if (side === 'SHORT' && entryVwap) {
+          calculatedRealizedPnl += (entryVwap - Number(fill.price)) * Number(fill.qty);
+        }
+      }
+    }
+    
+    // Update position with calculated values
     await tradingPool.query(`
-      UPDATE ft_positions
-      SET status = 'closed', current_price = $2, unrealized_pnl = $3
+      UPDATE ft_positions_v2
+      SET 
+        entry_price_vwap = $2,
+        exit_price_vwap = $3,
+        quantity_open = $4,
+        quantity_close = $5,
+        cost_basis = $6,
+        fees_total = $7,
+        realized_pnl = $8,
+        status = 'CLOSED',
+        close_ts = NOW(),
+        updated_at = NOW()
       WHERE position_id = $1
-    `, [position.position_id, currentPrice, realizedPnl]);
-
+    `, [
+      position.position_id,
+      entryVwap,
+      exitVwap,
+      quantityOpen,
+      exitFills.reduce((sum: number, f: any) => sum + Number(f.qty), 0),
+      costBasis,
+      feesTotal,
+      calculatedRealizedPnl
+    ]);
+    
     // Update run capital - return margin + realized P&L - fees
-    const capitalAdjustment = Number(position.cost_basis) + realizedPnl - fees;
+    const capitalAdjustment = Number(position.cost_basis) + calculatedRealizedPnl - feesTotal;
     await tradingPool.query(`
       UPDATE ft_runs
       SET current_capital = current_capital + $2
       WHERE run_id = $1
     `, [runId, capitalAdjustment]);
-  }
-}
-
-function calculateRealizedPnL(position: any, exitPrice: number): number {
-  if (position.side === 'LONG') {
-    return (exitPrice - position.entry_price) * position.size;
-  } else {
-    return (position.entry_price - exitPrice) * position.size;
   }
 }

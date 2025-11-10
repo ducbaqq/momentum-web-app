@@ -27,6 +27,13 @@ type FakeTradeRun = {
   stopped_at: string | null;
   error: string | null;
   created_at: string;
+  realized_pnl?: number;
+  unrealized_pnl?: number;
+  total_pnl?: number;
+  equity?: number;
+  cash?: number;
+  margin_used?: number;
+  open_positions_count?: number;
 };
 
 export default function FakeTraderPage() {
@@ -224,7 +231,15 @@ export default function FakeTraderPage() {
     return `$${capital.toLocaleString()}`;
   }
 
-  function calculatePnL(startingCapital: number, currentCapital: number) {
+  function calculatePnL(startingCapital: number, currentCapital: number, realizedPnl?: number, unrealizedPnl?: number) {
+    // Use API-provided PnL if available (preferred)
+    if (realizedPnl !== undefined && unrealizedPnl !== undefined) {
+      const pnl = realizedPnl + unrealizedPnl;
+      const pnlPercent = ((pnl / startingCapital) * 100);
+      return { pnl, pnlPercent };
+    }
+    
+    // Fallback: Calculate from capital difference
     const pnl = currentCapital - startingCapital;
     const pnlPercent = ((pnl / startingCapital) * 100);
     return { pnl, pnlPercent };
@@ -540,7 +555,12 @@ export default function FakeTraderPage() {
             {activeRuns.length > 0 ? (
               <div className="space-y-2">
                 {activeRuns.map(run => {
-                  const { pnl, pnlPercent } = calculatePnL(run.starting_capital, run.current_capital);
+                  const { pnl, pnlPercent } = calculatePnL(
+                    run.starting_capital, 
+                    run.current_capital,
+                    run.realized_pnl,
+                    run.unrealized_pnl
+                  );
                   return (
                     <div
                       key={run.run_id}
@@ -680,7 +700,12 @@ export default function FakeTraderPage() {
             {inactiveRuns.length > 0 ? (
               <div className="space-y-2 flex-1 overflow-y-auto">
                 {inactiveRuns.map(run => {
-                const { pnl, pnlPercent } = calculatePnL(run.starting_capital, run.current_capital);
+                const { pnl, pnlPercent } = calculatePnL(
+                  run.starting_capital, 
+                  run.current_capital,
+                  run.realized_pnl,
+                  run.unrealized_pnl
+                );
                 return (
                   <div
                     key={run.run_id}
