@@ -394,34 +394,72 @@ class FakeTrader {
     // Generate trading signals
     const signals = strategy(candle, strategyState, run.params);
     
-    // Execute entry signals (but skip if winding down)
-    for (const signal of signals) {
-      // If run is winding down, only allow exit signals
-      if (run.status === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
-        console.log(`     🚫 Skipping entry signal for ${signal.symbol} - run is winding down`);
+      // Process signals - distinguish between entry and exit signals
+      for (const signal of signals) {
+        // If run is winding down, only allow exit signals
+        if (run.status === 'winding_down' && (signal.side === 'LONG' || signal.side === 'SHORT')) {
+          console.log(`     🚫 Skipping entry signal for ${signal.symbol} - run is winding down`);
+          
+          // Log the skipped signal
+          await logSignal({
+            run_id: run.run_id,
+            symbol: signal.symbol,
+            signal_type: 'entry',
+            side: signal.side,
+            size: signal.size,
+            price: signal.price,
+            candle_data: candle,
+            executed: false,
+            rejection_reason: 'winding_down_no_new_positions',
+            signal_ts: new Date().toISOString()
+          });
+          
+          continue; // Skip this signal
+        }
         
-        // Log the skipped signal
-        await logSignal({
-          run_id: run.run_id,
-          symbol: signal.symbol,
-          signal_type: 'entry',
-          side: signal.side,
-          size: signal.size,
-          price: signal.price,
-          candle_data: candle,
-          executed: false,
-          rejection_reason: 'winding_down_no_new_positions',
-          signal_ts: new Date().toISOString()
-        });
+        // Check if this is an exit signal (opposite side of existing position)
+        const existingPosition = symbolPositions.find(p => p.status === 'open');
+        const isExitSignal = existingPosition && 
+          ((existingPosition.side === 'LONG' && signal.side === 'SHORT') ||
+           (existingPosition.side === 'SHORT' && signal.side === 'LONG'));
         
-        continue; // Skip this signal
+        if (isExitSignal) {
+          // This is an exit signal - close the existing position
+          console.log(`     🚪 Exit Signal: Closing ${existingPosition.side} position for ${signal.symbol} (reason: ${signal.reason})`);
+          
+          const exitPrice = candle.close;
+          const realizedPnl = this.calculateRealizedPnL(existingPosition, exitPrice);
+          const fees = existingPosition.size * exitPrice * 0.0004; // 0.04% fees
+          
+          await closePosition(existingPosition.position_id, exitPrice, realizedPnl);
+          
+          // Update run capital - add back margin + realized P&L - fees
+          const newCapital = run.current_capital + existingPosition.cost_basis + realizedPnl - fees;
+          await updateRunCapital(run.run_id, newCapital);
+          run.current_capital = newCapital; // Update local copy
+          
+          console.log(`     ✅ Closed ${existingPosition.side} position: P&L $${realizedPnl.toFixed(2)} (fees: $${fees.toFixed(2)}) (Capital: $${run.current_capital.toFixed(2)})`);
+          
+          // Log the exit signal
+          await logSignal({
+            run_id: run.run_id,
+            symbol: signal.symbol,
+            signal_type: 'exit',
+            side: signal.side,
+            size: signal.size,
+            price: signal.price,
+            candle_data: candle,
+            executed: true,
+            execution_price: exitPrice,
+            execution_notes: `Closed ${existingPosition.side} position: ${signal.reason}`,
+            signal_ts: new Date().toISOString()
+          });
+          
+        } else if (signal.side === 'LONG' || signal.side === 'SHORT') {
+          // This is an entry signal - open new position
+          await this.executeEntrySignal(run, signal, candle);
+        }
       }
-      
-      // Only process entry signals here (exit signals handled in position management)
-      if (signal.side === 'LONG' || signal.side === 'SHORT') {
-        await this.executeEntrySignal(run, signal, candle);
-      }
-    }
     
     // Log signal for debugging (even if no signals)
     if (signals.length === 0) {
