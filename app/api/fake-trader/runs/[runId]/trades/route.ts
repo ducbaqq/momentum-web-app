@@ -10,8 +10,8 @@ export async function GET(
   try {
     const { runId } = params;
 
-    // Get closed positions from ft_positions_v2 as "trades"
-    const query = `
+    // First, try to get closed positions from ft_positions_v2 (new canonical model)
+    const positionsQuery = `
       SELECT 
         position_id as trade_id,
         run_id,
@@ -32,10 +32,58 @@ export async function GET(
       ORDER BY close_ts DESC
     `;
     
-    const result = await tradingPool.query(query, [runId]);
+    const positionsResult = await tradingPool.query(positionsQuery, [runId]);
+    
+    // If we have positions from the new model, use them
+    if (positionsResult.rows.length > 0) {
+      const trades = positionsResult.rows.map(row => ({
+        trade_id: row.trade_id,
+        run_id: row.run_id,
+        symbol: row.symbol,
+        side: row.side,
+        entry_ts: row.entry_ts,
+        exit_ts: row.exit_ts,
+        qty: Number(row.qty),
+        entry_px: row.entry_px ? Number(row.entry_px) : undefined,
+        exit_px: row.exit_px ? Number(row.exit_px) : undefined,
+        realized_pnl: Number(row.realized_pnl),
+        unrealized_pnl: 0, // Closed positions have no unrealized PnL
+        fees: Number(row.fees),
+        leverage: Number(row.leverage),
+        status: row.status,
+        reason: 'strategy_exit' // Default reason, could be enhanced
+      }));
+
+      return NextResponse.json({ trades });
+    }
+    
+    // Fallback: Get trades from ft_trades (old model) if no positions found
+    const fallbackQuery = `
+      SELECT 
+        trade_id,
+        run_id,
+        symbol,
+        side,
+        entry_ts,
+        exit_ts,
+        qty,
+        entry_px,
+        exit_px,
+        realized_pnl,
+        unrealized_pnl,
+        fees,
+        leverage,
+        status,
+        reason
+      FROM ft_trades
+      WHERE run_id = $1
+      ORDER BY entry_ts DESC
+    `;
+    
+    const fallbackResult = await tradingPool.query(fallbackQuery, [runId]);
     
     // Convert numeric fields to proper numbers
-    const trades = result.rows.map(row => ({
+    const trades = fallbackResult.rows.map(row => ({
       trade_id: row.trade_id,
       run_id: row.run_id,
       symbol: row.symbol,
@@ -45,12 +93,12 @@ export async function GET(
       qty: Number(row.qty),
       entry_px: row.entry_px ? Number(row.entry_px) : undefined,
       exit_px: row.exit_px ? Number(row.exit_px) : undefined,
-      realized_pnl: Number(row.realized_pnl),
-      unrealized_pnl: 0, // Closed positions have no unrealized PnL
-      fees: Number(row.fees),
-      leverage: Number(row.leverage),
-      status: row.status,
-      reason: 'strategy_exit' // Default reason, could be enhanced
+      realized_pnl: Number(row.realized_pnl || 0),
+      unrealized_pnl: Number(row.unrealized_pnl || 0),
+      fees: Number(row.fees || 0),
+      leverage: Number(row.leverage || 1),
+      status: row.status || 'closed',
+      reason: row.reason || 'strategy_exit'
     }));
 
     return NextResponse.json({ trades });

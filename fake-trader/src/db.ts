@@ -549,26 +549,29 @@ export async function hasNew15mCandles(symbols: string[], lastCheckTime?: string
   return parseInt(result.rows[0].new_count) > 0;
 }
 
-// Store last processed candle timestamp for run
+// Store last processed candle timestamp for run and symbol (per-symbol tracking)
 export async function updateLastProcessedCandle(runId: string, symbol: string, timestamp: string): Promise<void> {
   const query = `
-    UPDATE ft_runs 
-    SET last_processed_candle = $2
-    WHERE run_id = $1
+    INSERT INTO ft_last_processed_candles (run_id, symbol, last_processed_candle, updated_at)
+    VALUES ($1, $2, $3, NOW())
+    ON CONFLICT (run_id, symbol) 
+    DO UPDATE SET 
+      last_processed_candle = EXCLUDED.last_processed_candle,
+      updated_at = NOW()
   `;
   
-  await tradingPool.query(query, [runId, timestamp]);
+  await tradingPool.query(query, [runId, symbol, timestamp]);
 }
 
-// Get last processed candle timestamp for run and symbol
+// Get last processed candle timestamp for run and symbol (per-symbol tracking)
 export async function getLastProcessedCandle(runId: string, symbol: string): Promise<string | null> {
   const query = `
     SELECT last_processed_candle
-    FROM ft_runs
-    WHERE run_id = $1
+    FROM ft_last_processed_candles
+    WHERE run_id = $1 AND symbol = $2
   `;
 
-  const result = await tradingPool.query(query, [runId]);
+  const result = await tradingPool.query(query, [runId, symbol]);
   return result.rows[0]?.last_processed_candle || null;
 }
 
