@@ -443,6 +443,27 @@ class FakeTrader {
     console.log(`     🎯 Entry Signal: ${signal.side} ${signal.size.toFixed(4)} ${signal.symbol} @ $${candle.close} (${signal.reason})`);
     
     try {
+      // Prevent SHORT positions (staging only - long-only trading)
+      if (signal.side === 'SHORT') {
+        console.log(`     🚫 SHORT positions are disabled - skipping signal`);
+        
+        // Log the rejected signal
+        await logSignal({
+          run_id: run.run_id,
+          symbol: signal.symbol,
+          signal_type: 'entry',
+          side: signal.side,
+          size: signal.size,
+          price: signal.price,
+          candle_data: candle,
+          executed: false,
+          rejection_reason: 'short_positions_disabled',
+          signal_ts: new Date().toISOString()
+        });
+        
+        return; // Exit early - don't execute the signal
+      }
+      
       // Check position limits BEFORE executing
       const currentPositions = await getCurrentPositions(run.run_id);
       if (currentPositions.length >= run.max_concurrent_positions) {
