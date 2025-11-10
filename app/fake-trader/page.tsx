@@ -75,9 +75,9 @@ export default function FakeTraderPage() {
     maxConcurrentPositions: 3,
 
     // Basic Strategy parameters (momentum_breakout_v2)
-    minRoc5m: 0.5,
+    minRoc5m: 0.05,
     minVolMult: 2,
-    maxSpreadBps: 8,
+    maxSpreadBps: 20,
 
     // Execution parameters
     feeBps: 4,
