@@ -104,8 +104,8 @@ export function momentumBreakoutV2Strategy(
         side: 'LONG',
         size: positionSize,
         type: 'MARKET',
-        stopLoss: candle.close * 0.98, // 2% stop loss
-        takeProfit: candle.close * 1.03, // 3% take profit
+        stopLoss: candle.close * (1 - (params.stopLossPct || 5) / 100), // Use stopLossPct from params, default 5%
+        takeProfit: candle.close * (1 + (params.takeProfitPct || 20) / 100), // Use takeProfitPct from params, default 20%
         leverage,
         reason: `momentum_breakout_v2_${timeframe}`
       });

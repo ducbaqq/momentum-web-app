@@ -329,9 +329,12 @@ class FakeTrader {
     let shouldExit = false;
     let exitReason = '';
     
-    // Check time-based exit (close positions older than 24 hours)
+    // Get position timeout from params (default 24 hours)
+    const positionTimeoutHours = run.params?.positionTimeoutHours || 24;
+    
+    // Check time-based exit (close positions older than configured timeout)
     const hoursOpen = (new Date().getTime() - new Date(position.opened_at).getTime()) / (1000 * 60 * 60);
-    if (hoursOpen > 24) {
+    if (hoursOpen > positionTimeoutHours) {
       shouldExit = true;
       exitReason = 'time_based_exit';
     }

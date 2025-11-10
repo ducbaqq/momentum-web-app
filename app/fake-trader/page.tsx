@@ -76,6 +76,11 @@ export default function FakeTraderPage() {
     feeBps: 4,
     slippageBps: 2,
     leverage: 20,
+
+    // Risk management parameters
+    stopLossPct: 5, // Default 5%
+    takeProfitPct: 20, // Default 20%
+    positionTimeoutHours: 24, // Default 24 hours
   });
 
   async function fetchSymbols() {
@@ -143,7 +148,10 @@ export default function FakeTraderPage() {
         slippageBps: formData.slippageBps,
         leverage: formData.leverage,
         minRoc5m: formData.minRoc5m,
-        minVolMult: formData.minVolMult
+        minVolMult: formData.minVolMult,
+        stopLossPct: formData.stopLossPct,
+        takeProfitPct: formData.takeProfitPct,
+        positionTimeoutHours: formData.positionTimeoutHours
       };
 
       const payload = {
@@ -433,6 +441,79 @@ export default function FakeTraderPage() {
                 leverage: formValidation.errors.leverage
               }}
             />
+
+            {/* Risk Management Parameters */}
+            <div className="border-t border-border pt-4 mt-4">
+              <h4 className="text-sm font-semibold mb-3">Risk Management</h4>
+              
+              <div className="space-y-4">
+                {/* Stop Loss */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Stop Loss (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="50"
+                    step="0.1"
+                    className="w-full bg-bg border border-border rounded px-3 py-2"
+                    value={formData.stopLossPct}
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value) || 0;
+                      setFormData(prev => ({ ...prev, stopLossPct: newValue }));
+                    }}
+                  />
+                  <p className="text-xs text-sub mt-1">
+                    Position will close if price moves against you by this percentage. Default: 5%
+                  </p>
+                </div>
+
+                {/* Take Profit */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Take Profit (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="100"
+                    step="0.1"
+                    className="w-full bg-bg border border-border rounded px-3 py-2"
+                    value={formData.takeProfitPct}
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value) || 0;
+                      setFormData(prev => ({ ...prev, takeProfitPct: newValue }));
+                    }}
+                  />
+                  <p className="text-xs text-sub mt-1">
+                    Position will close if price moves in your favor by this percentage. Default: 20%
+                  </p>
+                </div>
+
+                {/* Position Timeout */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Position Timeout (hours)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="168"
+                    step="1"
+                    className="w-full bg-bg border border-border rounded px-3 py-2"
+                    value={formData.positionTimeoutHours}
+                    onChange={(e) => {
+                      const newValue = parseInt(e.target.value) || 24;
+                      setFormData(prev => ({ ...prev, positionTimeoutHours: newValue }));
+                    }}
+                  />
+                  <p className="text-xs text-sub mt-1">
+                    Position will automatically close after this many hours. Default: 24 hours
+                  </p>
+                </div>
+              </div>
+            </div>
 
             <button
               onClick={submitFakeTrader}

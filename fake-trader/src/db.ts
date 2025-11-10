@@ -234,6 +234,7 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
     current_capital: Number(row.current_capital),
     max_concurrent_positions: Number(row.max_concurrent_positions),
     seed: row.seed ? Number(row.seed) : undefined,
+    params: typeof row.params === 'string' ? JSON.parse(row.params) : (row.params || {}),
   }));
 }
 
