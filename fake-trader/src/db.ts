@@ -234,6 +234,7 @@ export async function getActiveRuns(): Promise<FakeTradeRun[]> {
     current_capital: Number(row.current_capital),
     max_concurrent_positions: Number(row.max_concurrent_positions),
     seed: row.seed ? Number(row.seed) : undefined,
+    params: typeof row.params === 'string' ? JSON.parse(row.params) : (row.params || {}),
   }));
 }
 
@@ -322,31 +323,6 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
 
     const result = await dataPool.query(query, [symbols, startTime.toISOString(), endTime.toISOString()]);
     console.log(`🔍 [FAKE TRADER] Found ${result.rows.length} 1-minute candles across ${symbols.length} symbols`);
-    
-    // If no recent data found, try to get the latest available data (fallback for when collector is stopped)
-    if (result.rows.length === 0) {
-      console.log(`⚠️  No recent data found. Attempting to fetch latest available data...`);
-      const fallbackQuery = `
-        SELECT DISTINCT ON (o.symbol)
-          o.symbol,
-          o.ts,
-          o.open, o.high, o.low, o.close, o.volume, o.trades_count, o.vwap_minute,
-          f.roc_1m, f.roc_5m, f.roc_15m, f.roc_30m, f.roc_1h, f.roc_4h,
-          f.rsi_14, f.ema_12, f.ema_20, f.ema_26, f.ema_50, f.macd, f.macd_signal,
-          f.bb_upper, f.bb_lower, f.bb_basis, f.vol_avg_20, f.vol_mult, f.book_imb, f.spread_bps
-        FROM ohlcv_1m o
-        LEFT JOIN features_1m f ON f.symbol=o.symbol AND f.ts=o.ts
-        WHERE o.symbol = ANY($1)
-        ORDER BY o.symbol, o.ts DESC
-      `;
-      const fallbackResult = await dataPool.query(fallbackQuery, [symbols]);
-      if (fallbackResult.rows.length > 0) {
-        const latestTs = fallbackResult.rows[0].ts;
-        console.log(`⚠️  Found latest available data timestamp: ${latestTs}`);
-        console.log(`⚠️  Data collector appears to be stopped. Consider restarting it.`);
-      }
-    }
-    
     return processCandlesResult(result, symbols);
   }
 
@@ -403,7 +379,7 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
         (ARRAY_AGG(bb_lower ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(bb_lower), 1)] AS bb_lower,
         (ARRAY_AGG(bb_basis ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(bb_basis), 1)] AS bb_basis,
         (ARRAY_AGG(vol_avg_20 ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(vol_avg_20), 1)] AS vol_avg_20,
-        (ARRAY_AGG(vol_mult ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(vol_mult), 1)] AS vol_mult,
+        (ARRAY_AGG(vol_mult ORDER BY ts) FILTER (WHERE vol_mult IS NOT NULL))[array_length(ARRAY_AGG(vol_mult ORDER BY ts) FILTER (WHERE vol_mult IS NOT NULL), 1)] AS vol_mult,
         (ARRAY_AGG(book_imb ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(book_imb), 1)] AS book_imb,
         (ARRAY_AGG(spread_bps ORDER BY ts))[ARRAY_LENGTH(ARRAY_AGG(spread_bps), 1)] AS spread_bps
       FROM buckets
@@ -415,21 +391,6 @@ export async function getRecentCandles(symbols: string[], lookbackMinutes: numbe
 
   const result = await dataPool.query(query, [symbols, startTime.toISOString(), endTime.toISOString(), timeframeMinutes]);
   console.log(`🔍 [FAKE TRADER] Found ${result.rows.length} ${timeframe} candles across ${symbols.length} symbols`);
-  
-  // If no recent data found, warn about collector status
-  if (result.rows.length === 0) {
-    console.log(`⚠️  No recent ${timeframe} data found. Checking latest available data...`);
-    const latestCheck = await dataPool.query(`
-      SELECT MAX(ts) as latest_ts FROM ohlcv_1m WHERE symbol = ANY($1)
-    `, [symbols]);
-    if (latestCheck.rows[0]?.latest_ts) {
-      const latestTs = latestCheck.rows[0].latest_ts;
-      const hoursAgo = (Date.now() - new Date(latestTs).getTime()) / (1000 * 60 * 60);
-      console.log(`⚠️  Latest available data: ${latestTs} (${hoursAgo.toFixed(1)} hours ago)`);
-      console.log(`⚠️  Data collector appears to be stopped. Consider restarting it.`);
-    }
-  }
-  
   return processCandlesResult(result, symbols);
 }
 
@@ -442,38 +403,52 @@ export async function getCompleted15mCandles(symbols: string[]): Promise<Record<
   
   // Use the same approach as backtest worker - aggregate 1m OHLCV data with pre-calculated features
   const query = `
-    WITH aggregated_15m_candles AS (
-      SELECT 
-        o.symbol,
-        to_timestamp(floor(extract(epoch from o.ts) / (15*60)) * (15*60)) AT TIME ZONE 'UTC' as candle_start,
-        AVG(o.open::double precision) as open,
-        MAX(o.high::double precision) as high,
-        MIN(o.low::double precision) as low,
-        AVG(o.close::double precision) as close,
-        SUM(o.volume::double precision) as volume,
-        -- Aggregate features - use the latest values in each 15m period
-        AVG(COALESCE(f.roc_5m, 0)) as roc_5m,
-        AVG(COALESCE(f.vol_mult, 1)) as vol_mult,
-        AVG(COALESCE(f.roc_1m, 0)) as roc_1m,
-        AVG(COALESCE(f.roc_15m, 0)) as roc_15m,
-        AVG(COALESCE(f.roc_30m, 0)) as roc_30m,
-        AVG(COALESCE(f.roc_1h, 0)) as roc_1h,
-        AVG(COALESCE(f.roc_4h, 0)) as roc_4h,
-        AVG(COALESCE(f.rsi_14, 50)) as rsi_14,
-        AVG(COALESCE(f.ema_20, o.close::double precision)) as ema_20,
-        AVG(COALESCE(f.ema_50, o.close::double precision)) as ema_50,
-        AVG(COALESCE(f.bb_upper, o.close::double precision * 1.02)) as bb_upper,
-        AVG(COALESCE(f.bb_lower, o.close::double precision * 0.98)) as bb_lower,
-        AVG(COALESCE(f.spread_bps, 5)) as spread_bps,
-        COUNT(*) as minute_count
-      FROM ohlcv_1m o
-      LEFT JOIN features_1m f ON f.symbol = o.symbol AND f.ts = o.ts
-      WHERE o.symbol = ANY($1)
-        AND o.ts >= $2::timestamp 
-        AND o.ts < $3::timestamp
-      GROUP BY o.symbol, candle_start
-      HAVING COUNT(*) >= 10  -- Ensure we have most of the 15m period data
-    )
+      WITH base_with_features AS (
+        SELECT 
+          o.symbol,
+          o.ts,
+          to_timestamp(floor(extract(epoch from o.ts) / (15*60)) * (15*60)) AT TIME ZONE 'UTC' as candle_start,
+          o.open::double precision as open,
+          o.high::double precision as high,
+          o.low::double precision as low,
+          o.close::double precision as close,
+          o.volume::double precision as volume,
+          f.roc_5m, f.vol_mult, f.roc_1m, f.roc_15m, f.roc_30m, f.roc_1h, f.roc_4h,
+          f.rsi_14, f.ema_20, f.ema_50, f.bb_upper, f.bb_lower, f.spread_bps
+        FROM ohlcv_1m o
+        LEFT JOIN features_1m f ON f.symbol = o.symbol AND f.ts = o.ts
+        WHERE o.symbol = ANY($1)
+          AND o.ts >= $2::timestamp 
+          AND o.ts < $3::timestamp
+      ),
+      aggregated_15m_candles AS (
+        SELECT 
+          symbol,
+          candle_start,
+          AVG(open) as open,
+          MAX(high) as high,
+          MIN(low) as low,
+          AVG(close) as close,
+          SUM(volume) as volume,
+          -- Use the last NON-NULL value for each feature (most recent in the 15m period)
+          (ARRAY_AGG(roc_5m ORDER BY ts) FILTER (WHERE roc_5m IS NOT NULL))[array_length(ARRAY_AGG(roc_5m ORDER BY ts) FILTER (WHERE roc_5m IS NOT NULL), 1)] as roc_5m,
+          (ARRAY_AGG(vol_mult ORDER BY ts) FILTER (WHERE vol_mult IS NOT NULL))[array_length(ARRAY_AGG(vol_mult ORDER BY ts) FILTER (WHERE vol_mult IS NOT NULL), 1)] as vol_mult,
+          (ARRAY_AGG(roc_1m ORDER BY ts) FILTER (WHERE roc_1m IS NOT NULL))[array_length(ARRAY_AGG(roc_1m ORDER BY ts) FILTER (WHERE roc_1m IS NOT NULL), 1)] as roc_1m,
+          (ARRAY_AGG(roc_15m ORDER BY ts) FILTER (WHERE roc_15m IS NOT NULL))[array_length(ARRAY_AGG(roc_15m ORDER BY ts) FILTER (WHERE roc_15m IS NOT NULL), 1)] as roc_15m,
+          (ARRAY_AGG(roc_30m ORDER BY ts) FILTER (WHERE roc_30m IS NOT NULL))[array_length(ARRAY_AGG(roc_30m ORDER BY ts) FILTER (WHERE roc_30m IS NOT NULL), 1)] as roc_30m,
+          (ARRAY_AGG(roc_1h ORDER BY ts) FILTER (WHERE roc_1h IS NOT NULL))[array_length(ARRAY_AGG(roc_1h ORDER BY ts) FILTER (WHERE roc_1h IS NOT NULL), 1)] as roc_1h,
+          (ARRAY_AGG(roc_4h ORDER BY ts) FILTER (WHERE roc_4h IS NOT NULL))[array_length(ARRAY_AGG(roc_4h ORDER BY ts) FILTER (WHERE roc_4h IS NOT NULL), 1)] as roc_4h,
+          (ARRAY_AGG(rsi_14 ORDER BY ts) FILTER (WHERE rsi_14 IS NOT NULL))[array_length(ARRAY_AGG(rsi_14 ORDER BY ts) FILTER (WHERE rsi_14 IS NOT NULL), 1)] as rsi_14,
+          (ARRAY_AGG(ema_20 ORDER BY ts) FILTER (WHERE ema_20 IS NOT NULL))[array_length(ARRAY_AGG(ema_20 ORDER BY ts) FILTER (WHERE ema_20 IS NOT NULL), 1)] as ema_20,
+          (ARRAY_AGG(ema_50 ORDER BY ts) FILTER (WHERE ema_50 IS NOT NULL))[array_length(ARRAY_AGG(ema_50 ORDER BY ts) FILTER (WHERE ema_50 IS NOT NULL), 1)] as ema_50,
+          (ARRAY_AGG(bb_upper ORDER BY ts) FILTER (WHERE bb_upper IS NOT NULL))[array_length(ARRAY_AGG(bb_upper ORDER BY ts) FILTER (WHERE bb_upper IS NOT NULL), 1)] as bb_upper,
+          (ARRAY_AGG(bb_lower ORDER BY ts) FILTER (WHERE bb_lower IS NOT NULL))[array_length(ARRAY_AGG(bb_lower ORDER BY ts) FILTER (WHERE bb_lower IS NOT NULL), 1)] as bb_lower,
+          (ARRAY_AGG(spread_bps ORDER BY ts) FILTER (WHERE spread_bps IS NOT NULL))[array_length(ARRAY_AGG(spread_bps ORDER BY ts) FILTER (WHERE spread_bps IS NOT NULL), 1)] as spread_bps,
+          COUNT(*) as minute_count
+        FROM base_with_features
+        GROUP BY symbol, candle_start
+        HAVING COUNT(*) >= 10  -- Ensure we have most of the 15m period data
+      )
     SELECT 
       symbol,
       candle_start as ts,
@@ -549,29 +524,26 @@ export async function hasNew15mCandles(symbols: string[], lastCheckTime?: string
   return parseInt(result.rows[0].new_count) > 0;
 }
 
-// Store last processed candle timestamp for run and symbol (per-symbol tracking)
+// Store last processed candle timestamp for run
 export async function updateLastProcessedCandle(runId: string, symbol: string, timestamp: string): Promise<void> {
   const query = `
-    INSERT INTO ft_last_processed_candles (run_id, symbol, last_processed_candle, updated_at)
-    VALUES ($1, $2, $3, NOW())
-    ON CONFLICT (run_id, symbol) 
-    DO UPDATE SET 
-      last_processed_candle = EXCLUDED.last_processed_candle,
-      updated_at = NOW()
+    UPDATE ft_runs 
+    SET last_processed_candle = $2
+    WHERE run_id = $1
   `;
   
-  await tradingPool.query(query, [runId, symbol, timestamp]);
+  await tradingPool.query(query, [runId, timestamp]);
 }
 
-// Get last processed candle timestamp for run and symbol (per-symbol tracking)
+// Get last processed candle timestamp for run and symbol
 export async function getLastProcessedCandle(runId: string, symbol: string): Promise<string | null> {
   const query = `
     SELECT last_processed_candle
-    FROM ft_last_processed_candles
-    WHERE run_id = $1 AND symbol = $2
+    FROM ft_runs
+    WHERE run_id = $1
   `;
 
-  const result = await tradingPool.query(query, [runId, symbol]);
+  const result = await tradingPool.query(query, [runId]);
   return result.rows[0]?.last_processed_candle || null;
 }
 
@@ -666,7 +638,6 @@ export async function getCurrentPositions(runId: string): Promise<FakePosition[]
   const result = await tradingPool.query(query, [runId]);
   return result.rows.map(row => ({
     ...row,
-    trade_id: row.trade_id || undefined,
     size: Number(row.size),
     entry_price: Number(row.entry_price),
     current_price: row.current_price ? Number(row.current_price) : undefined,
@@ -702,14 +673,14 @@ export async function createTrade(trade: Omit<FakeTrade, 'trade_id' | 'created_a
 export async function createPosition(position: Omit<FakePosition, 'position_id' | 'opened_at' | 'last_update'>): Promise<string> {
   const query = `
     INSERT INTO ft_positions (
-      run_id, trade_id, symbol, side, size, entry_price, current_price,
+      run_id, symbol, side, size, entry_price, current_price,
       unrealized_pnl, cost_basis, market_value, stop_loss, take_profit, leverage, status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     RETURNING position_id
   `;
   
   const values = [
-    position.run_id, position.trade_id || null, position.symbol, position.side, position.size, position.entry_price, position.current_price,
+    position.run_id, position.symbol, position.side, position.size, position.entry_price, position.current_price,
     position.unrealized_pnl, position.cost_basis, position.market_value, position.stop_loss, position.take_profit, 
     position.leverage, position.status
   ];
@@ -731,49 +702,24 @@ export async function updatePosition(positionId: string, currentPrice: number, u
 
 // Close position
 export async function closePosition(positionId: string, exitPrice: number, realizedPnl: number): Promise<void> {
-  // First, get the trade_id from the position
-  const positionQuery = await tradingPool.query(
-    'SELECT trade_id FROM ft_positions WHERE position_id = $1',
-    [positionId]
-  );
-  
-  if (positionQuery.rows.length === 0) {
-    throw new Error(`Position ${positionId} not found`);
-  }
-  
-  const tradeId = positionQuery.rows[0].trade_id;
-  
-  if (!tradeId) {
-    console.warn(`⚠️  Position ${positionId} has no trade_id. Using fallback matching.`);
-    // Fallback to old method if trade_id is missing
-    const updateTradeQuery = `
-      UPDATE ft_trades 
-      SET exit_ts = NOW(), exit_px = $2, realized_pnl = $3, status = 'closed'
-      WHERE run_id = (SELECT run_id FROM ft_positions WHERE position_id = $1)
-      AND symbol = (SELECT symbol FROM ft_positions WHERE position_id = $1)
-      AND status = 'open'
-      ORDER BY entry_ts DESC
-      LIMIT 1
-    `;
-    await tradingPool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
-  } else {
-    // Use trade_id for precise matching
-    const updateTradeQuery = `
-      UPDATE ft_trades 
-      SET exit_ts = NOW(), exit_px = $2, realized_pnl = $3, status = 'closed'
-      WHERE trade_id = $1
-    `;
-    await tradingPool.query(updateTradeQuery, [tradeId, exitPrice, realizedPnl]);
-  }
-  
-  // Update position status
-  const updatePositionQuery = `
+  const query = `
     UPDATE ft_positions 
     SET status = 'closed', current_price = $2, last_update = NOW()
     WHERE position_id = $1
   `;
   
-  await tradingPool.query(updatePositionQuery, [positionId, exitPrice]);
+  await tradingPool.query(query, [positionId, exitPrice]);
+  
+  // Also update the corresponding trade
+  const updateTradeQuery = `
+    UPDATE ft_trades 
+    SET exit_ts = NOW(), exit_px = $2, realized_pnl = $3, status = 'closed'
+    WHERE run_id = (SELECT run_id FROM ft_positions WHERE position_id = $1)
+    AND symbol = (SELECT symbol FROM ft_positions WHERE position_id = $1)
+    AND status = 'open'
+  `;
+  
+  await tradingPool.query(updateTradeQuery, [positionId, exitPrice, realizedPnl]);
 }
 
 // Log strategy signal
