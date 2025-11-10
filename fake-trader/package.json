@@ -6,8 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev-v2": "tsx watch src/index-v2.ts",
     "build": "tsc",
+    "build-v2": "tsc src/index-v2.ts --outDir dist-v2",
     "start": "node dist/index.js",
+    "start-v2": "node dist-v2/index-v2.js",
     "test": "tsx src/tests/index.ts",
     "setup-db": "tsx setup-staging-db.ts",
     "setup-dev": "tsx setup-staging-db.ts dev",

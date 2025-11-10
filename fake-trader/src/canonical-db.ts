@@ -203,6 +203,8 @@ export async function getPositionV2(positionId: string): Promise<PositionV2 | nu
     fees_total: Number(row.fees_total),
     realized_pnl: Number(row.realized_pnl),
     leverage_effective: Number(row.leverage_effective),
+    stop_loss: row.stop_loss ? Number(row.stop_loss) : undefined,
+    take_profit: row.take_profit ? Number(row.take_profit) : undefined,
   };
 }
 
@@ -251,8 +253,9 @@ export async function createPositionV2(position: Omit<PositionV2, 'position_id' 
   const query = `
     INSERT INTO ft_positions_v2 (
       run_id, symbol, side, status, open_ts, close_ts, entry_price_vwap, exit_price_vwap,
-      quantity_open, quantity_close, cost_basis, fees_total, realized_pnl, leverage_effective
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      quantity_open, quantity_close, cost_basis, fees_total, realized_pnl, leverage_effective,
+      stop_loss, take_profit
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
     RETURNING position_id
   `;
   
@@ -271,6 +274,8 @@ export async function createPositionV2(position: Omit<PositionV2, 'position_id' 
     position.fees_total,
     position.realized_pnl, // Will be recomputed from fills
     position.leverage_effective,
+    position.stop_loss || null,
+    position.take_profit || null,
   ];
   
   const result = await pool.query(query, values);
@@ -299,6 +304,8 @@ export async function getOpenPositionsV2(runId: string): Promise<PositionV2[]> {
     fees_total: Number(row.fees_total),
     realized_pnl: Number(row.realized_pnl),
     leverage_effective: Number(row.leverage_effective),
+    stop_loss: row.stop_loss ? Number(row.stop_loss) : undefined,
+    take_profit: row.take_profit ? Number(row.take_profit) : undefined,
   }));
 }
 
@@ -325,6 +332,8 @@ export async function getOpenPositionV2BySymbol(runId: string, symbol: string): 
     fees_total: Number(row.fees_total),
     realized_pnl: Number(row.realized_pnl),
     leverage_effective: Number(row.leverage_effective),
+    stop_loss: row.stop_loss ? Number(row.stop_loss) : undefined,
+    take_profit: row.take_profit ? Number(row.take_profit) : undefined,
   };
 }
 
@@ -350,6 +359,8 @@ export async function getOpenPositionsV2BySymbol(runId: string, symbol: string):
     fees_total: Number(row.fees_total),
     realized_pnl: Number(row.realized_pnl),
     leverage_effective: Number(row.leverage_effective),
+    stop_loss: row.stop_loss ? Number(row.stop_loss) : undefined,
+    take_profit: row.take_profit ? Number(row.take_profit) : undefined,
   }));
 }
 

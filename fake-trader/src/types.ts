@@ -186,6 +186,8 @@ export interface PositionV2 {
   fees_total: number;
   realized_pnl: number; // Computed from fills, never stored directly
   leverage_effective: number;
+  stop_loss?: number;
+  take_profit?: number;
   created_at: string;
   updated_at: string;
 }
